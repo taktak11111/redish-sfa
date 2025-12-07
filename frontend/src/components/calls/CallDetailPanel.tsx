@@ -53,7 +53,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
   }, [record])
 
   useEffect(() => {
-    // 設定変更を監視（設定ページから戻った時に更新）
     const handleStorageChange = () => {
       setDropdownSettings({
         staffIS: getDropdownOptions('staffIS'),
@@ -72,7 +71,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
     }
     
     window.addEventListener('storage', handleStorageChange)
-    // 同じウィンドウ内での変更も検知するため、定期的にチェック
     const interval = setInterval(handleStorageChange, 1000)
     
     return () => {
@@ -88,7 +86,8 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
     }))
   }
 
-  const handleChange = (field: keyof CallRecord, value: string | number | undefined) => {
+  // CallRecord の任意フィールドを柔軟に更新できるユーティリティ
+  const handleChange = <K extends keyof CallRecord>(field: K, value: CallRecord[K]) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
@@ -112,7 +111,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
       const updatedHistory = (formData.callHistory || []).filter(h => h.id !== historyId)
       const updatedCallCount = Math.max(0, (formData.callCount || 0) - 1)
       
-      // 最新の架電日を更新
       let updatedLastCalledDate = formData.lastCalledDate
       if (updatedHistory.length > 0) {
         const sortedHistory = [...updatedHistory].sort((a, b) => 
@@ -134,26 +132,21 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
     let updatedHistory: CallHistory[]
 
     if (editingHistory) {
-      // 編集
       updatedHistory = (formData.callHistory || []).map(h =>
         h.id === editingHistory.id
           ? { ...historyData, id: h.id, createdAt: h.createdAt }
           : h
       )
     } else {
-      // 新規追加
       const newHistory: CallHistory = {
         ...historyData,
         id: `ch_${now.getTime()}`,
         createdAt: now,
       }
       updatedHistory = [...(formData.callHistory || []), newHistory]
-      
-      // callCountをインクリメント
       handleChange('callCount', (formData.callCount || 0) + 1)
     }
 
-    // 最新の架電日を更新
     const sortedHistory = [...updatedHistory].sort((a, b) =>
       new Date(b.callDate).getTime() - new Date(a.callDate).getTime()
     )
@@ -189,14 +182,12 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
 
   return (
     <>
-      {/* オーバーレイ */}
       <div
         className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
         style={{ animation: 'fadeIn 0.3s ease-out' }}
         onClick={onClose}
       />
       
-      {/* サイドパネル */}
       <div 
         className="fixed top-0 right-0 h-full bg-white shadow-2xl z-50 overflow-y-auto"
         style={{ 
@@ -221,7 +212,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* 基本情報セクション */}
           <section>
             <button
               type="button"
@@ -343,7 +333,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
             )}
           </section>
 
-          {/* 連携元情報セクション */}
           <section>
             <button
               type="button"
@@ -448,7 +437,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
             )}
           </section>
 
-          {/* 架電管理セクション */}
           <section>
             <button
               type="button"
@@ -616,7 +604,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
             )}
           </section>
 
-          {/* 架電履歴セクション */}
           <section>
             <button
               type="button"
@@ -709,7 +696,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
             )}
           </section>
 
-          {/* アクション管理セクション */}
           <section>
             <button
               type="button"
@@ -802,7 +788,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
             )}
           </section>
 
-          {/* 商談情報セクション */}
           <section>
             <button
               type="button"
@@ -898,7 +883,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
             )}
           </section>
 
-          {/* フッター */}
           <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex justify-end gap-3">
             <button
               type="button"
@@ -918,7 +902,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
         </form>
       </div>
 
-      {/* リサイクル優先度定義モーダル */}
       {showRecyclePriorityModal && (
         <>
           <div
@@ -940,7 +923,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                 </button>
               </div>
               <div className="p-6 space-y-6">
-                {/* 優先度A */}
                 <div className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <span className="text-lg font-bold text-gray-900">優先度 A</span>
@@ -963,7 +945,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                   </div>
                 </div>
 
-                {/* 優先度B */}
                 <div className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <span className="text-lg font-bold text-gray-900">優先度 B</span>
@@ -986,7 +967,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                   </div>
                 </div>
 
-                {/* 優先度C */}
                 <div className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <span className="text-lg font-bold text-gray-900">優先度 C</span>
@@ -1009,7 +989,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                   </div>
                 </div>
 
-                {/* 優先度D */}
                 <div className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <span className="text-lg font-bold text-gray-900">優先度 D</span>
@@ -1031,7 +1010,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                   </div>
                 </div>
 
-                {/* 優先度E */}
                 <div className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <span className="text-lg font-bold text-gray-900">優先度 E</span>
@@ -1068,7 +1046,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
         </>
       )}
 
-      {/* 架電履歴モーダル */}
       <CallHistoryModal
         isOpen={showHistoryModal}
         history={editingHistory}
