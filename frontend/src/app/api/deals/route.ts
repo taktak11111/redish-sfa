@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 // Supabase設定
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://bszxofqfdseqgeccypsq.supabase.co'
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzenhvZnFmZHNlcWdlY2N5cHNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMDk4NTgsImV4cCI6MjA4MDY4NTg1OH0.ymqLi5JxGvAT9RokHe8_mjl4euXaTljs9bwwlGqeoXg'
 
-// Supabaseクライアント作成
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+// Supabaseクライアント（遅延初期化）
+let supabaseClient: SupabaseClient | null = null
+
+function getSupabaseClient(): SupabaseClient {
+  if (!supabaseClient) {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  }
+  return supabaseClient
+}
 
 // スネークケース → キャメルケース変換
 function toCamelCase(record: any) {
@@ -130,6 +137,7 @@ function toSnakeCase(data: any) {
 // GET: 商談一覧を取得
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseClient()
     const searchParams = request.nextUrl.searchParams
     const staff = searchParams.get('staff')
 
@@ -166,6 +174,7 @@ export async function GET(request: NextRequest) {
 // POST: 新規商談を作成
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseClient()
     const body = await request.json()
     const snakeCaseData = toSnakeCase(body)
 
@@ -205,6 +214,7 @@ export async function POST(request: NextRequest) {
 // PATCH: 商談を更新
 export async function PATCH(request: NextRequest) {
   try {
+    const supabase = getSupabaseClient()
     const body = await request.json()
     const { dealId, ...updates } = body
 

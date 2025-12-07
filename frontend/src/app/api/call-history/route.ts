@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 // Supabase設定
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://bszxofqfdseqgeccypsq.supabase.co'
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzenhvZnFmZHNlcWdlY2N5cHNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMDk4NTgsImV4cCI6MjA4MDY4NTg1OH0.ymqLi5JxGvAT9RokHe8_mjl4euXaTljs9bwwlGqeoXg'
 
-// Supabaseクライアント作成
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+// Supabaseクライアント（遅延初期化）
+let supabaseClient: SupabaseClient | null = null
+
+function getSupabaseClient(): SupabaseClient {
+  if (!supabaseClient) {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  }
+  return supabaseClient
+}
 
 // スネークケース → キャメルケース変換
 function toCamelCase(record: any) {
@@ -27,6 +34,7 @@ function toCamelCase(record: any) {
 // GET: 架電履歴を取得
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseClient()
     const searchParams = request.nextUrl.searchParams
     const callRecordId = searchParams.get('callRecordId')
     const leadId = searchParams.get('leadId')
@@ -79,6 +87,7 @@ export async function GET(request: NextRequest) {
 // POST: 架電履歴を追加
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseClient()
     const body = await request.json()
     const { leadId, callDate, callTime, staffIS, status, result, duration, memo } = body
 
@@ -146,6 +155,7 @@ export async function POST(request: NextRequest) {
 // DELETE: 架電履歴を削除
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = getSupabaseClient()
     const searchParams = request.nextUrl.searchParams
     const id = searchParams.get('id')
 
