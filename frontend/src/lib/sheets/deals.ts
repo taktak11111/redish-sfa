@@ -27,7 +27,7 @@ export async function fetchDealById(dealId: string): Promise<Deal | null> {
 // 担当者別に商談を取得
 export async function fetchDealsByStaff(staff: string): Promise<Deal[]> {
   const deals = await fetchDeals()
-  return deals.filter(deal => deal.staff === staff)
+  return deals.filter(deal => deal.staffIS === staff)
 }
 
 // 結果別に商談を取得
@@ -49,7 +49,7 @@ export async function createDeal(dealData: Omit<Deal, 'id' | 'createdAt'>): Prom
   const rowData: string[] = new Array(Object.keys(columnMapping).length).fill('')
   
   rowData[columnMapping[DEAL_COLUMNS.DEAL_ID]] = nextDealId
-  rowData[columnMapping[DEAL_COLUMNS.STAFF]] = dealData.staff
+  rowData[columnMapping[DEAL_COLUMNS.STAFF]] = dealData.staffIS || ''
   rowData[columnMapping[DEAL_COLUMNS.LEAD_ID]] = dealData.leadId
   rowData[columnMapping[DEAL_COLUMNS.COMPANY_NAME]] = dealData.companyName
   rowData[columnMapping[DEAL_COLUMNS.CONTACT_NAME]] = dealData.contactName
@@ -164,7 +164,8 @@ function parseDeal(row: string[], columnMapping: ColumnMapping): Deal | null {
   return {
     id: dealId,
     leadId: row[columnMapping[DEAL_COLUMNS.LEAD_ID]] || '',
-    staff: row[columnMapping[DEAL_COLUMNS.STAFF]] || '',
+    leadSource: row[columnMapping[DEAL_COLUMNS.LEAD_ID]]?.substring(0, 2) || '',
+    staffIS: row[columnMapping[DEAL_COLUMNS.STAFF]] || '',
     companyName: row[columnMapping[DEAL_COLUMNS.COMPANY_NAME]] || '',
     contactName: row[columnMapping[DEAL_COLUMNS.CONTACT_NAME]] || '',
     phone: row[columnMapping[DEAL_COLUMNS.PHONE]] || '',
