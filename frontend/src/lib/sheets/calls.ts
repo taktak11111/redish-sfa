@@ -106,7 +106,7 @@ export async function updateCallRecord(
       sheetsClient.setValues(
         sheetConfig.name,
         `${columnToLetter(col)}${actualRow}`,
-        [[formatDate(updates.lastCalledAt)]]
+        [[updates.lastCalledAt]]
       )
     )
   }
@@ -128,24 +128,25 @@ function parseCallRecord(row: string[], columnMapping: ColumnMapping): CallRecor
     phone: row[columnMapping[CALL_COLUMNS.PHONE]] || '',
     status: (row[columnMapping[CALL_COLUMNS.STATUS]] || '未架電') as CallStatus,
     appointmentStatus: row[columnMapping[CALL_COLUMNS.APPT_STATUS]] || undefined,
-    appointmentDate: parseDate(row[columnMapping[CALL_COLUMNS.APPT_DATE]]),
+    appointmentDate: parseDateString(row[columnMapping[CALL_COLUMNS.APPT_DATE]]),
     staff: row[columnMapping[CALL_COLUMNS.STAFF]] || undefined,
     memo: row[columnMapping[CALL_COLUMNS.MEMO]] || undefined,
-    linkedAt: parseDate(row[columnMapping[CALL_COLUMNS.LINKED_DATE]]) || new Date(),
+    linkedAt: parseDateString(row[columnMapping[CALL_COLUMNS.LINKED_DATE]]) || formatCurrentDate(),
     callCount: parseInt(row[columnMapping[CALL_COLUMNS.CALL_COUNT]] || '0', 10),
-    lastCalledAt: parseDate(row[columnMapping[CALL_COLUMNS.LAST_CALLED]]),
+    lastCalledAt: parseDateString(row[columnMapping[CALL_COLUMNS.LAST_CALLED]]),
   }
 }
 
-// 日付文字列をDateに変換
-function parseDate(dateStr: string | undefined): Date | undefined {
+// 日付文字列を検証して返す（無効な場合はundefined）
+function parseDateString(dateStr: string | undefined): string | undefined {
   if (!dateStr) return undefined
   const date = new Date(dateStr)
-  return isNaN(date.getTime()) ? undefined : date
+  return isNaN(date.getTime()) ? undefined : dateStr
 }
 
-// DateをYYYY/MM/DD形式に変換
-function formatDate(date: Date): string {
+// 現在日付をYYYY/MM/DD形式で返す
+function formatCurrentDate(): string {
+  const date = new Date()
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
