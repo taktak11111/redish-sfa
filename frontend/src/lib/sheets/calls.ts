@@ -106,7 +106,7 @@ export async function updateCallRecord(
       sheetsClient.setValues(
         sheetConfig.name,
         `${columnToLetter(col)}${actualRow}`,
-        [[updates.lastCalledAt]]
+        [[formatDateToString(updates.lastCalledAt)]]
       )
     )
   }
@@ -131,9 +131,9 @@ function parseCallRecord(row: string[], columnMapping: ColumnMapping): CallRecor
     appointmentDate: parseDateString(row[columnMapping[CALL_COLUMNS.APPT_DATE]]),
     staff: row[columnMapping[CALL_COLUMNS.STAFF]] || undefined,
     memo: row[columnMapping[CALL_COLUMNS.MEMO]] || undefined,
-    linkedAt: parseDateString(row[columnMapping[CALL_COLUMNS.LINKED_DATE]]) || formatCurrentDate(),
+    linkedAt: parseStringToDate(row[columnMapping[CALL_COLUMNS.LINKED_DATE]]),
     callCount: parseInt(row[columnMapping[CALL_COLUMNS.CALL_COUNT]] || '0', 10),
-    lastCalledAt: parseDateString(row[columnMapping[CALL_COLUMNS.LAST_CALLED]]),
+    lastCalledAt: parseStringToDate(row[columnMapping[CALL_COLUMNS.LAST_CALLED]]),
   }
 }
 
@@ -144,11 +144,22 @@ function parseDateString(dateStr: string | undefined): string | undefined {
   return isNaN(date.getTime()) ? undefined : dateStr
 }
 
-// 現在日付をYYYY/MM/DD形式で返す
-function formatCurrentDate(): string {
-  const date = new Date()
+// 文字列からDateオブジェクトに変換（CallRecord.linkedAt, lastCalledAt用）
+function parseStringToDate(dateStr: string | undefined): Date | undefined {
+  if (!dateStr) return undefined
+  const date = new Date(dateStr)
+  return isNaN(date.getTime()) ? undefined : date
+}
+
+// DateオブジェクトをYYYY/MM/DD形式の文字列に変換
+function formatDateToString(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}/${month}/${day}`
+}
+
+// 現在日付をYYYY/MM/DD形式で返す
+function formatCurrentDate(): string {
+  return formatDateToString(new Date())
 }
