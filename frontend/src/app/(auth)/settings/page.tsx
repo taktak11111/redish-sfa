@@ -60,24 +60,33 @@ export default function SettingsPage() {
   }
 
   const addOption = (field: keyof DropdownSettings, option: DropdownOption) => {
-    setSettings(prev => ({
-      ...prev,
-      [field]: [...prev[field], option],
-    }))
+    setSettings(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        [field]: [...prev[field], option],
+      }
+    })
   }
 
   const removeOption = (field: keyof DropdownSettings, index: number) => {
-    setSettings(prev => ({
-      ...prev,
-      [field]: prev[field].filter((_, i) => i !== index),
-    }))
+    setSettings(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        [field]: prev[field].filter((_, i) => i !== index),
+      }
+    })
   }
 
   const updateOption = (field: keyof DropdownSettings, index: number, option: DropdownOption) => {
-    setSettings(prev => ({
-      ...prev,
-      [field]: prev[field].map((item, i) => i === index ? option : item),
-    }))
+    setSettings(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        [field]: prev[field].map((item, i) => i === index ? option : item),
+      }
+    })
   }
 
   const sections = [
