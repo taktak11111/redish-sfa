@@ -1,0 +1,137 @@
+# REDISH SFA 開発ルール（Cursor用）
+
+## ⚠️ 必須: 開発前に確認すること
+
+**開発作業を開始する前に、必ず以下のガイドラインを確認してください：**
+
+### 必須参照ドキュメント
+
+| # | ガイドライン | パス |
+|---|-------------|------|
+| 1 | **要件定義書** | `docs/SFA_Webアプリ化_企画書・要件定義書.md` |
+| 2 | **開発ルール** | `docs/開発ルール.md` |
+
+---
+
+## コーディング規約
+
+### 言語とフレームワーク
+- **言語**: TypeScript（厳格モード）
+- **フレームワーク**: Next.js 14 (App Router) + React 18
+- **スタイリング**: Tailwind CSS
+- **状態管理**: TanStack Query (サーバー状態)
+- **フォーム**: React Hook Form + Zod
+
+### ファイル命名規則
+- **コンポーネント**: PascalCase（`LeadList.tsx`, `DealCard.tsx`）
+- **ユーティリティ**: camelCase（`sheetsApi.ts`, `dateUtils.ts`）
+- **型定義**: camelCase + .ts（`lead.ts`, `deal.ts`）
+- **フック**: camelCase + use（`useLeads.ts`, `useDeals.ts`）
+
+### 型定義ルール
+- すべての関数に型定義を追加
+- **any型の使用禁止**（やむを得ない場合はunknown）
+- 型定義は`src/types/`に配置
+
+### コンポーネント設計
+- 1ファイル1コンポーネント
+- 再利用可能なコンポーネントは`components/ui/`に配置
+- 機能固有のコンポーネントは`components/[機能名]/`に配置
+
+### スタイリング
+- Tailwind CSSを使用
+- ハードコードされた色（#xxxxxx）の使用禁止
+- カスタムカラー（`primary-600`等）を使用
+- クラス名の順序: レイアウト → サイズ → タイポグラフィ → カラー → その他
+
+---
+
+## SFA固有の用語
+
+### ID体系
+- リードID: MT0001（Meetsmore）, TP0001（TEMPOS）, OM0001（OMC）, AM0001（Amazon）, MK0001（Makuake）
+- 商談ID: SA0001〜
+- 成約ID: CN0001〜
+- 顧客コード: A000001（飲食）, B000001（非飲食）
+
+### ステータス値
+- 架電: 未架電, 架電中, 03.アポイント獲得済, 09.アポ獲得
+- 商談: 01.成約（契約締結）, 02.失注（リサイクル対象外）, 03.失注（リサイクル対象）
+- 確度: A:80%, B:50%, C:20%, D:10%
+
+### リードソース
+- TEMPOS, OMC, Meetsmore, Amazon, Makuake, REDISH
+
+---
+
+## Google Sheets API連携
+
+### シート定義（既存GASから継承）
+```typescript
+const SHEETS = {
+  CALL_MANAGEMENT: { name: '架電管理表', idRow: 1, headerRow: 8, dataStartRow: 9 },
+  DEAL_MANAGEMENT: { name: '商談管理表', idRow: 1, headerRow: 8, dataStartRow: 9 },
+  CONTRACT_MANAGEMENT: { name: '成約管理表', idRow: 1, headerRow: 8, dataStartRow: 9 },
+};
+```
+
+### カラムID体系
+- K系: 架電管理表のカラム（K01: リードID, K02: リードソース, K04: 連携日, K16: アポステータス）
+- S系: 商談管理表のカラム（S02: 担当者, S06: 確度, S16: 商談結果, S22: 商談実施日）
+
+---
+
+## エラーハンドリング
+
+### 必須エラーハンドリング
+- API呼び出しはtry-catchでエラーを捕捉
+- ユーザーに分かりやすいエラーメッセージを表示
+- コンソールには詳細な情報を出力
+
+```typescript
+// 良い例
+try {
+  const data = await fetchLeads();
+  return data;
+} catch (error) {
+  console.error('[fetchLeads] リード取得エラー:', error);
+  throw new Error('リードの取得に失敗しました。再度お試しください。');
+}
+```
+
+---
+
+## Git運用
+
+### ブランチ命名規則
+- feature/add-lead-management
+- fix/deal-status-sync
+- hotfix/critical-bug
+
+### コミットメッセージ
+```
+[種類] 簡潔な説明
+
+- 詳細1
+- 詳細2
+
+関連: #123
+```
+
+種類: feat, fix, docs, style, refactor, test, chore
+
+---
+
+## 言語設定
+
+- Always respond in Japanese
+
+---
+
+## クリティカルシンキング
+
+すべての対話において、以下の姿勢を維持してください：
+
+1. **建設的に疑う**: 情報や前提を鵜呑みにせず、「本当にそうか？」と問う
+2. **代替案を意識**: 「他にもっと良い方法はないか？」を常に考える
+3. **実務適用可能性**: 「これは実際に使えるか？」を検証する視点を持つ
