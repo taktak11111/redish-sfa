@@ -145,3 +145,9 @@ export function letterToColumn(letter: string): number {
 
 // シングルトンインスタンス
 export const sheetsClient = new SheetsClient()
+
+
+
+
+
+

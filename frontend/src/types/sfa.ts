@@ -290,3 +290,9 @@ export interface DailySalesAnalysis {
   }
   lostReasons: Record<LostReason, number>
 }
+
+
+
+
+
+

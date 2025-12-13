@@ -4,17 +4,13 @@ import GoogleProvider from 'next-auth/providers/google'
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      authorization: {
-        params: {
-          scope: 'openid email profile https://www.googleapis.com/auth/spreadsheets',
-        },
-      },
+      clientId: process.env.GOOGLE_CLIENT_ID || '',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
     }),
   ],
+  secret: process.env.NEXTAUTH_SECRET,
   callbacks: {
-    async signIn({ account, profile }) {
+    async signIn({ profile }) {
       // 許可されたドメインのみログイン可能
       const allowedDomains = process.env.ALLOWED_EMAIL_DOMAINS?.split(',') || []
       const email = profile?.email || ''
@@ -27,25 +23,33 @@ export const authOptions: NextAuthOptions = {
       
       return true
     },
-    async jwt({ token, account }) {
-      // アクセストークンを保存（Sheets API用）
-      if (account) {
-        token.accessToken = account.access_token
-        token.refreshToken = account.refresh_token
+    async jwt({ token, account, profile }) {
+      if (account && profile) {
+        token.email = profile.email
+        token.name = profile.name
       }
       return token
     },
     async session({ session, token }) {
-      // セッションにトークンを追加
-      session.accessToken = token.accessToken as string
+      if (session.user) {
+        session.user.email = token.email as string
+        session.user.name = token.name as string
+      }
       return session
     },
   },
   pages: {
     signIn: '/',
-    error: '/auth/error',
   },
   session: {
     strategy: 'jwt',
+    maxAge: 30 * 24 * 60 * 60, // 30 days
   },
+  debug: process.env.NODE_ENV === 'development',
 }
+
+
+
+
+
+

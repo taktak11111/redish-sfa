@@ -2,18 +2,38 @@
 
 import { useSession, signIn } from 'next-auth/react'
 import { redirect } from 'next/navigation'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+
+// 開発モードかどうか
+const IS_DEV = process.env.NODE_ENV === 'development'
 
 export default function Home() {
   const { data: session, status } = useSession()
+  const [showContent, setShowContent] = useState(false)
 
+  useEffect(() => {
+    if (status === 'authenticated') {
+      redirect('/dashboard')
+    }
+    
+    // 開発モードでは2秒後にコンテンツを表示（認証がタイムアウトした場合）
+    if (IS_DEV) {
+      const timer = setTimeout(() => {
+        setShowContent(true)
+      }, 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [status])
+
+  // 認証済みの場合はリダイレクト
   useEffect(() => {
     if (status === 'authenticated') {
       redirect('/dashboard')
     }
   }, [status])
 
-  if (status === 'loading') {
+  // 開発モード以外でローディング中の場合
+  if (status === 'loading' && !showContent) {
     return (
       <div 
         className="min-h-screen flex items-center justify-center"
@@ -95,3 +115,9 @@ export default function Home() {
     </main>
   )
 }
+
+
+
+
+
+

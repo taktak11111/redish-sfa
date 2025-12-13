@@ -13,22 +13,38 @@ const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [
   { value: '04.アポなし', label: 'アポなし', color: 'badge-danger' },
 ]
 
-export default function CallsPage() {
+// リードソースのオプション
+const LEAD_SOURCE_OPTIONS = [
+  { value: 'all', label: 'すべてのソース' },
+  { value: 'Meetsmore', label: 'Meetsmore' },
+  { value: 'TEMPOS', label: 'TEMPOS' },
+  { value: 'OMC', label: 'OMC' },
+  { value: 'Amazon', label: 'Amazon' },
+  { value: 'Makuake', label: 'Makuake' },
+  { value: 'REDISH', label: 'REDISH' },
+]
+
+export default function LeadsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterSource, setFilterSource] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedRecord, setSelectedRecord] = useState<CallRecord | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
+    leadId: 100,
     linkedDate: 120,
-    leadSource: 100,
+    leadSource: 120,
     companyName: 200,
     contactName: 120,
     contactNameKana: 120,
     industry: 120,
     phone: 140,
+    email: 180,
+    address: 200,
     openingDate: 120,
     contactPreferredDateTime: 150,
     allianceRemarks: 200,
+    status: 120,
   })
   const [resizingColumn, setResizingColumn] = useState<string | null>(null)
   const [resizeStartX, setResizeStartX] = useState(0)
@@ -36,10 +52,10 @@ export default function CallsPage() {
   const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['calls'],
+    queryKey: ['leads'],
     queryFn: async () => {
       const response = await fetch('/api/calls')
-      if (!response.ok) throw new Error('Failed to fetch calls')
+      if (!response.ok) throw new Error('Failed to fetch leads')
       return response.json()
     },
   })
@@ -51,11 +67,11 @@ export default function CallsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId, ...updates }),
       })
-      if (!response.ok) throw new Error('Failed to update call')
+      if (!response.ok) throw new Error('Failed to update lead')
       return response.json()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['calls'] })
+      queryClient.invalidateQueries({ queryKey: ['leads'] })
     },
   })
 
@@ -90,12 +106,14 @@ export default function CallsPage() {
 
   const filteredRecords = (data?.data as CallRecord[] || []).filter(record => {
     const matchesStatus = filterStatus === 'all' || record.status === filterStatus
+    const matchesSource = filterSource === 'all' || record.leadSource === filterSource
     const matchesSearch = searchTerm === '' || 
-      record.companyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      record.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      record.phone.includes(searchTerm) ||
-      record.leadId.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesStatus && matchesSearch
+      record.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.contactName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.phone?.includes(searchTerm) ||
+      record.leadId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.email?.toLowerCase().includes(searchTerm.toLowerCase())
+    return matchesStatus && matchesSource && matchesSearch
   })
 
   const handleRowClick = (record: CallRecord) => {
@@ -122,6 +140,15 @@ export default function CallsPage() {
     setResizeStartWidth(columnWidths[columnKey] || 120)
   }
 
+  // ステータスに応じた色を返す
+  const getStatusBadge = (status: string) => {
+    const option = STATUS_OPTIONS.find(opt => opt.value === status)
+    if (!option) return <span className="badge badge-gray">{status || '不明'}</span>
+    
+    const colorClass = option.color
+    return <span className={`badge ${colorClass}`}>{option.label}</span>
+  }
+
   if (error) {
     return (
       <div className="card p-6 text-center">
@@ -134,8 +161,8 @@ export default function CallsPage() {
     <div className="relative">
       <div className="sticky top-0 z-10 bg-white pb-4 border-b border-gray-200 shadow-sm">
         <div className="mb-4">
-          <h1 className="text-2xl font-bold text-gray-900">架電管理</h1>
-          <p className="mt-1 text-sm text-gray-500">リードへの架電状況を管理します</p>
+          <h1 className="text-2xl font-bold text-gray-900">リード管理</h1>
+          <p className="mt-1 text-sm text-gray-500">アライアンス先から取り込んだリードを一元管理します</p>
         </div>
 
         <div className="card p-4 mb-4">
@@ -143,7 +170,7 @@ export default function CallsPage() {
             <div className="flex-1">
               <input
                 type="text"
-                placeholder="会社名、担当者名、電話番号、リードIDで検索..."
+                placeholder="会社名、担当者名、電話番号、メール、リードIDで検索..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="input"
@@ -151,9 +178,24 @@ export default function CallsPage() {
             </div>
             <div className="sm:w-48">
               <select
+                value={filterSource}
+                onChange={(e) => setFilterSource(e.target.value)}
+                className="input"
+                aria-label="リードソースでフィルタ"
+              >
+                {LEAD_SOURCE_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:w-48">
+              <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
                 className="input"
+                aria-label="ステータスでフィルタ"
               >
                 <option value="all">すべてのステータス</option>
                 {STATUS_OPTIONS.map(option => (
@@ -164,6 +206,15 @@ export default function CallsPage() {
               </select>
             </div>
           </div>
+          <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
+            <span>全 {filteredRecords.length} 件</span>
+            {filterSource !== 'all' && (
+              <span className="badge badge-info">{filterSource}</span>
+            )}
+            {filterStatus !== 'all' && (
+              <span className="badge badge-gray">{STATUS_OPTIONS.find(s => s.value === filterStatus)?.label}</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -173,123 +224,42 @@ export default function CallsPage() {
             <table className="divide-y divide-gray-200" style={{ width: 'max-content', minWidth: '100%' }}>
               <thead className="bg-gray-100">
                 <tr>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.linkedDate, minWidth: 20 }}
-                  >
-                    <span>連携日</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('linkedDate', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.leadSource, minWidth: 20 }}
-                  >
-                    <span>リードソース</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('leadSource', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.companyName, minWidth: 20 }}
-                  >
-                    <span>会社名</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('companyName', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.contactName, minWidth: 20 }}
-                  >
-                    <span>氏名</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('contactName', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.contactNameKana, minWidth: 20 }}
-                  >
-                    <span>ふりがな</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('contactNameKana', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.industry, minWidth: 20 }}
-                  >
-                    <span>業種</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('industry', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.phone, minWidth: 20 }}
-                  >
-                    <span>電話番号</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('phone', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.openingDate, minWidth: 20 }}
-                  >
-                    <span>開業時期</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('openingDate', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.contactPreferredDateTime, minWidth: 20 }}
-                  >
-                    <span>連絡希望日時</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('contactPreferredDateTime', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none"
-                    style={{ width: columnWidths.allianceRemarks, minWidth: 20 }}
-                  >
-                    <span>連携元備考</span>
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('allianceRemarks', e)}
-                      style={{ transform: 'translateX(50%)' }}
-                    />
-                  </th>
+                  {[
+                    { key: 'leadId', label: 'リードID' },
+                    { key: 'linkedDate', label: '連携日' },
+                    { key: 'leadSource', label: 'リードソース' },
+                    { key: 'companyName', label: '会社名' },
+                    { key: 'contactName', label: '氏名' },
+                    { key: 'contactNameKana', label: 'ふりがな' },
+                    { key: 'industry', label: '業種' },
+                    { key: 'phone', label: '電話番号' },
+                    { key: 'email', label: 'メール' },
+                    { key: 'address', label: '住所/エリア' },
+                    { key: 'openingDate', label: '開業時期' },
+                    { key: 'contactPreferredDateTime', label: '連絡希望日時' },
+                    { key: 'allianceRemarks', label: '連携元備考' },
+                    { key: 'status', label: 'ステータス' },
+                  ].map((col, idx, arr) => (
+                    <th
+                      key={col.key}
+                      className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none ${idx < arr.length - 1 ? 'border-r border-gray-400' : ''}`}
+                      style={{ width: columnWidths[col.key], minWidth: 20 }}
+                    >
+                      <span>{col.label}</span>
+                      <div
+                        className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
+                        onMouseDown={(e) => handleResizeStart(col.key, e)}
+                        style={{ transform: 'translateX(50%)' }}
+                      />
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <tr key={`loading-${i}`}>
-                      {[...Array(10)].map((_, j) => (
+                      {[...Array(14)].map((_, j) => (
                         <td key={`loading-${i}-${j}`} className="px-4 py-4">
                           <div className="h-4 bg-gray-100 rounded animate-pulse"></div>
                         </td>
@@ -298,22 +268,25 @@ export default function CallsPage() {
                   ))
                 ) : filteredRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-gray-500">
-                      架電データがありません
+                    <td colSpan={14} className="px-4 py-8 text-center text-gray-500">
+                      リードデータがありません
                     </td>
                   </tr>
                 ) : (
                   filteredRecords.map((record, index) => (
                     <tr 
-                      key={record.leadId || `call-${index}`}
+                      key={record.leadId || `lead-${index}`}
                       onClick={() => handleRowClick(record)}
                       className="hover:bg-gray-50 cursor-pointer"
                     >
+                      <td className="px-4 py-4 text-sm font-medium text-gray-900" style={{ width: columnWidths.leadId, minWidth: 20 }}>
+                        {record.leadId}
+                      </td>
                       <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.linkedDate, minWidth: 20 }}>
                         {record.linkedDate || '-'}
                       </td>
-                      <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.leadSource, minWidth: 20 }}>
-                        {record.leadSource}
+                      <td className="px-4 py-4 text-sm" style={{ width: columnWidths.leadSource, minWidth: 20 }}>
+                        <span className="badge badge-info">{record.leadSource}</span>
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-900" style={{ width: columnWidths.companyName, minWidth: 20 }}>
                         {record.companyName}
@@ -330,6 +303,12 @@ export default function CallsPage() {
                       <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.phone, minWidth: 20 }}>
                         {record.phone}
                       </td>
+                      <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.email, minWidth: 20 }}>
+                        {record.email || '-'}
+                      </td>
+                      <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.address, minWidth: 20 }}>
+                        {record.address || '-'}
+                      </td>
                       <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.openingDate, minWidth: 20 }}>
                         {record.openingDate || '-'}
                       </td>
@@ -338,6 +317,9 @@ export default function CallsPage() {
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.allianceRemarks, minWidth: 20 }}>
                         {record.allianceRemarks || '-'}
+                      </td>
+                      <td className="px-4 py-4 text-sm" style={{ width: columnWidths.status, minWidth: 20 }}>
+                        {getStatusBadge(record.status)}
                       </td>
                     </tr>
                   ))

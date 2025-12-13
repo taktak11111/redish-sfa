@@ -1,13 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { CallStatus } from '@/types/sfa'
 
 // Supabase設定
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://bszxofqfdseqgeccypsq.supabase.co'
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzenhvZnFmZHNlcWdlY2N5cHNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMDk4NTgsImV4cCI6MjA4MDY4NTg1OH0.ymqLi5JxGvAT9RokHe8_mjl4euXaTljs9bwwlGqeoXg'
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
+// サーバーサイドでは SERVICE_ROLE_KEY を優先使用、なければ ANON_KEY を使用
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-// Supabaseクライアント作成
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+// Supabaseクライアント（遅延初期化）
+let supabaseClient: SupabaseClient | null = null
+
+function getSupabaseClient(): SupabaseClient {
+  if (!supabaseClient) {
+    console.log('[API/calls] Checking environment variables...')
+    console.log(`[API/calls] NEXT_PUBLIC_SUPABASE_URL: '${SUPABASE_URL}'`)
+    console.log(`[API/calls] SUPABASE_KEY length: ${SUPABASE_KEY?.length}`)
+    
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+      throw new Error(`Supabase environment variables missing. URL: ${!!SUPABASE_URL}, KEY: ${!!SUPABASE_KEY}`)
+    }
+    
+    try {
+      supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+          persistSession: false,
+        },
+      })
+      console.log('[API/calls] Supabase client created successfully')
+    } catch (err) {
+      console.error('[API/calls] Failed to create Supabase client:', err)
+      throw err
+    }
+  }
+  return supabaseClient
+}
 
 // スネークケース → キャメルケース変換
 function toCamelCase(record: any) {
@@ -113,6 +139,9 @@ function toSnakeCase(data: any) {
 // GET: 架電記録一覧を取得
 export async function GET(request: NextRequest) {
   try {
+    console.log('[API/calls] Connecting to Supabase...')
+    const supabase = getSupabaseClient()
+    
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get('status') as CallStatus | null
 
@@ -125,22 +154,24 @@ export async function GET(request: NextRequest) {
       query = query.eq('status', status)
     }
 
+    console.log('[API/calls] Executing query...')
     const { data, error } = await query
 
     if (error) {
-      console.error('[API/calls] Supabase error:', error)
+      console.error('[API/calls] Supabase query error:', JSON.stringify(error, null, 2))
       return NextResponse.json(
-        { error: 'データの取得に失敗しました', details: error.message },
+        { error: 'データの取得に失敗しました', details: error.message, code: error.code },
         { status: 500 }
       )
     }
 
+    console.log(`[API/calls] Successfully fetched ${data?.length || 0} records`)
     const records = (data || []).map(toCamelCase)
     return NextResponse.json({ data: records })
-  } catch (error) {
-    console.error('[API/calls] Error:', error)
+  } catch (error: any) {
+    console.error('[API/calls] Unexpected error:', error)
     return NextResponse.json(
-      { error: 'データの取得に失敗しました' },
+      { error: 'データの取得に失敗しました', details: error.message || String(error) },
       { status: 500 }
     )
   }
@@ -149,6 +180,7 @@ export async function GET(request: NextRequest) {
 // POST: 新規架電記録を作成
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseClient()
     const body = await request.json()
     const snakeCaseData = toSnakeCase(body)
 
@@ -179,6 +211,7 @@ export async function POST(request: NextRequest) {
 // PATCH: 架電記録を更新
 export async function PATCH(request: NextRequest) {
   try {
+    const supabase = getSupabaseClient()
     const body = await request.json()
     const { leadId, ...updates } = body
 
@@ -271,3 +304,9 @@ export async function PATCH(request: NextRequest) {
     )
   }
 }
+
+
+
+
+
+

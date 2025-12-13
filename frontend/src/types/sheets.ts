@@ -139,3 +139,9 @@ export const CONTRACT_COLUMNS = {
 
 // カラムIDから列インデックスへのマッピング（動的に生成）
 export type ColumnMapping = Record<string, number>
+
+
+
+
+
+

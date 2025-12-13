@@ -5,13 +5,41 @@ import { usePathname } from 'next/navigation'
 import { signOut, useSession } from 'next-auth/react'
 import { useState, useEffect, useRef } from 'react'
 
-const navigation = [
+type NavItem = {
+  name: string
+  href: string
+  icon: React.ComponentType<IconProps>
+  badge?: string
+}
+
+type NavSeparator = {
+  type: 'separator'
+  label: string
+}
+
+type NavElement = NavItem | NavSeparator
+
+const navigation: NavElement[] = [
   { name: 'ダッシュボード', href: '/dashboard', icon: HomeIcon },
+  
+  // 営業活動
+  { type: 'separator', label: '営業活動' },
+  { name: 'リード管理', href: '/leads', icon: UserGroupIcon },
   { name: '架電管理', href: '/calls', icon: PhoneIcon },
   { name: '商談管理', href: '/deals', icon: BriefcaseIcon },
   { name: '成約管理', href: '/contracts', icon: DocumentCheckIcon },
-  { name: 'フィールド分析', href: '/analysis/field', icon: ChartBarIcon },
-  { name: 'インサイド分析', href: '/analysis/sales', icon: ChartPieIcon },
+  
+  // 分析・改善
+  { type: 'separator', label: '分析・改善' },
+  { name: '架電結果分析', href: '/analysis/sales', icon: ChartPieIcon },
+  { name: '商談結果分析', href: '/analysis/field', icon: ChartBarIcon },
+  { name: '架電プロセス分析', href: '/analysis/calls', icon: ChartBarIcon, badge: 'New' },
+  { name: '商談プロセス分析', href: '/analysis/deals', icon: ChartBarIcon, badge: 'New' },
+  
+  // 成長・学習
+  { type: 'separator', label: '学習' },
+  { name: 'ナレッジセンター', href: '/learning', icon: AcademicCapIcon, badge: 'New' },
+  
   { name: '設定', href: '/settings', icon: CogIcon },
 ]
 
@@ -122,12 +150,28 @@ export function Sidebar() {
 
       {/* ナビゲーション */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {navigation.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+        {navigation.map((item, index) => {
+          // セパレーターの場合
+          if ('type' in item && item.type === 'separator') {
+            if (isCollapsed) {
+              return <div key={`sep-${index}`} className="my-2 border-t border-gray-200" />
+            }
+            return (
+              <div key={`sep-${index}`} className={`pt-4 pb-1 ${isMedium ? 'px-1' : 'px-2'}`}>
+                <span className={`text-xs font-semibold text-gray-400 uppercase tracking-wider ${isMedium ? 'text-[10px]' : ''}`}>
+                  {item.label}
+                </span>
+              </div>
+            )
+          }
+
+          // 通常のナビゲーションアイテム
+          const navItem = item as NavItem
+          const isActive = pathname === navItem.href || pathname.startsWith(navItem.href + '/')
           return (
             <Link
-              key={item.name}
-              href={item.href}
+              key={navItem.name}
+              href={navItem.href}
               className={`
                 flex items-center py-2.5 text-sm font-medium rounded-lg transition-colors group relative
                 ${isCollapsed ? 'justify-center px-2 gap-0' : isMedium ? 'px-2 gap-2' : 'px-3 gap-3'}
@@ -141,21 +185,28 @@ export function Sidebar() {
                 borderLeft: '4px solid #00a4c5',
                 color: '#00627b'
               } : {}}
-              title={isCollapsed ? item.name : undefined}
+              title={isCollapsed ? navItem.name : undefined}
             >
-              <item.icon 
+              <navItem.icon 
                 className={`flex-shrink-0 ${isMedium ? 'w-4 h-4' : 'w-5 h-5'}`}
                 style={isActive ? { color: '#0083a0' } : {}}
               />
               {!isCollapsed && (
-                <span className={`whitespace-nowrap ${isMedium ? 'text-xs truncate' : ''}`}>
-                  {item.name}
+                <span className={`whitespace-nowrap flex-1 ${isMedium ? 'text-xs truncate' : ''}`}>
+                  {navItem.name}
+                </span>
+              )}
+              {/* Newバッジ */}
+              {!isCollapsed && navItem.badge && (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold text-white rounded" style={{ backgroundColor: '#00a4c5' }}>
+                  {navItem.badge}
                 </span>
               )}
               {/* ツールチップ（折りたたみ時のみ） */}
               {isCollapsed && (
                 <span className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
-                  {item.name}
+                  {navItem.name}
+                  {navItem.badge && ` (${navItem.badge})`}
                 </span>
               )}
             </Link>
@@ -300,3 +351,25 @@ function CogIcon({ className, style }: IconProps) {
     </svg>
   )
 }
+
+function UserGroupIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+    </svg>
+  )
+}
+
+function AcademicCapIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
+    </svg>
+  )
+}
+
+
+
+
+
+

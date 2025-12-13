@@ -123,3 +123,9 @@ export function getDropdownOptions(field: keyof DropdownSettings): DropdownOptio
   const settings = getDropdownSettings()
   return settings[field] || []
 }
+
+
+
+
+
+
