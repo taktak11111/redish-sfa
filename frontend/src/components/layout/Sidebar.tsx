@@ -12,6 +12,7 @@ const navigation = [
   { name: '成約管理', href: '/contracts', icon: DocumentCheckIcon },
   { name: 'フィールド分析', href: '/analysis/field', icon: ChartBarIcon },
   { name: 'インサイド分析', href: '/analysis/sales', icon: ChartPieIcon },
+  { name: 'AI商談FB', href: '/analysis/deal-feedback', icon: BriefcaseIcon, badge: 'New' },
   { name: '設定', href: '/settings', icon: CogIcon },
 ]
 

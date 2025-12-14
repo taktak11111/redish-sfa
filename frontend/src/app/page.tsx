@@ -1,17 +1,18 @@
 'use client'
 
 import { useSession, signIn } from 'next-auth/react'
-import { redirect } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 
 export default function Home() {
-  const { data: session, status } = useSession()
+  const router = useRouter()
+  const { status } = useSession()
 
   useEffect(() => {
     if (status === 'authenticated') {
-      redirect('/dashboard')
+      router.replace('/dashboard')
     }
-  }, [status])
+  }, [router, status])
 
   if (status === 'loading') {
     return (
@@ -19,10 +20,10 @@ export default function Home() {
         className="min-h-screen flex items-center justify-center"
         style={{ background: 'linear-gradient(to bottom right, #e6f7fa, #b3e8f0)' }}
       >
-        <div 
-          className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2"
-          style={{ borderColor: '#0083a0' }}
-        ></div>
+        <div
+          className="animate-spin rounded-full border-t-2 border-b-2"
+          style={{ width: 48, height: 48, borderColor: '#0083a0' }}
+        />
       </div>
     )
   }
