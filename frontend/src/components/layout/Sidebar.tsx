@@ -35,6 +35,7 @@ const navigation: NavElement[] = [
   { name: '商談結果分析', href: '/analysis/field', icon: ChartBarIcon },
   { name: '架電プロセス分析', href: '/analysis/calls', icon: ChartBarIcon, badge: 'New' },
   { name: '商談プロセス分析', href: '/analysis/deals', icon: ChartBarIcon, badge: 'New' },
+  { name: 'AI商談FB', href: '/analysis/deal-feedback', icon: BriefcaseIcon, badge: 'New' },
   
   // 成長・学習
   { type: 'separator', label: '学習' },

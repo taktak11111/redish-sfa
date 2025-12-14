@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Deal, DealRank, DealResult } from '@/types/sfa'
 import { getDropdownOptions } from '@/lib/dropdownSettings'
 
@@ -26,6 +27,7 @@ interface DealDetailPanelProps {
 }
 
 export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailPanelProps) {
+  const router = useRouter()
   const [formData, setFormData] = useState<Partial<Deal>>(deal)
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     basic: true,
@@ -109,15 +111,25 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
             <h2 className="text-xl font-bold text-gray-900">商談詳細</h2>
             <p className="text-sm text-gray-500 mt-1">{deal.id}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            aria-label="閉じる"
-          >
-            <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => router.push(`/analysis/deal-feedback?dealId=${encodeURIComponent(deal.id)}`)}
+              title="この商談をAI商談FBで振り返る"
+            >
+              AI商談FBを開く
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              aria-label="閉じる"
+            >
+              <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
