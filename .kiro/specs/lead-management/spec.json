@@ -20,5 +20,8 @@
   },
   "ready_for_implementation": true,
   "implementation_completed": true,
-  "note": "cc-sdd導入前に実装完了。specは後付けで作成（記録目的）"
+  "validation_completed": true,
+  "validation_date": "2026-01-05",
+  "validation_result": "pass",
+  "note": "cc-sdd導入前に実装完了。specは後付けで作成（記録目的）。2026-01-05 動作確認完了"
 }

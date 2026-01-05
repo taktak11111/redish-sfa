@@ -260,10 +260,12 @@ REDISH_SFA/
 
 | ドキュメント | パス | 内容 |
 |-------------|------|------|
-| **企画書・要件定義書** | `docs/SFA_Webアプリ化_企画書・要件定義書.md` | システム企画、要件定義、機能要件、非機能要件 |
-| **開発ルール** | `docs/開発ルール.md` | 開発ルール、コーディング規約 |
-| **デザインシステム** | `docs/デザインシステム.md` | デザインシステム、UIガイドライン |
-| **デプロイガイド** | `docs/setup_guide_supabase_vercel_github.md` | Supabase、Vercel、GitHubのセットアップガイド |
+| **企画書（UIベースSDD形式）** | `docs/01_企画書/📋 REDISH_SFA企画書_UIベースSDD形式.md` | UIベースSDD開発手法テンプレート準拠 |
+| **要件定義書（UIベースSDD形式）** | `docs/02_詳細設計書/📋 REDISH_SFA要件定義書_UIベースSDD形式.md` | UIベースSDD開発手法テンプレート準拠 |
+| **企画書・要件定義書（原本）** | `docs/01_企画書/SFA_Webアプリ化_企画書・要件定義書.md` | システム企画、要件定義、機能要件、非機能要件 |
+| **開発ルール** | `docs/04_ルール・ガイドライン/開発ルール.md` | 開発ルール、コーディング規約 |
+| **デザインシステム** | `docs/04_ルール・ガイドライン/デザインシステム.md` | デザインシステム、UIガイドライン |
+| **デプロイガイド** | `docs/05_環境構築・デプロイ/setup_guide_supabase_vercel_github.md` | Supabase、Vercel、GitHubのセットアップガイド |
 | **開発パートナーオンボーディング** | `docs/08_引き継ぎ資料/開発パートナー_オンボーディングパック.md` | 外部/協業パートナー向けの最短着手ガイド |
 
 ### 開発前チェックリスト
@@ -318,6 +320,24 @@ REDISH_SFA/
   - 開発モードでは認証スキップ、本番では401エラー
   - spec: `.kiro/specs/api-route-auth-guard/`
 
+### cc-sdd Spec一覧（Validation完了）
+
+| Spec | Phase | Validation | 備考 |
+|------|-------|:----------:|------|
+| lead-management | ✅ completed | ✅ pass | 後付けspec |
+| call-management | ✅ completed | ✅ pass | 後付けspec |
+| deal-management | ✅ completed | ✅ pass | 後付けspec |
+| contract-management | ✅ completed | ✅ pass | 後付けspec |
+| call-analysis | ✅ completed | ✅ pass | 後付けspec |
+| deal-analysis | ✅ completed | ✅ pass | 後付けspec |
+| security-anon-rls-removal | ✅ completed | ✅ pass | 新規cc-sdd準拠 |
+| api-route-auth-guard | ✅ completed | ✅ pass | 新規cc-sdd準拠 |
+
+### UIベースSDD開発手法適用（2026-01-05）
+- [x] 企画書テンプレート適用: `docs/01_企画書/📋 REDISH_SFA企画書_UIベースSDD形式.md`
+- [x] 要件定義書テンプレート適用: `docs/02_詳細設計書/📋 REDISH_SFA要件定義書_UIベースSDD形式.md`
+- [x] 全機能Validation完了（動作確認済み）
+
 ### 認証
 - [ ] NextAuth.js の認証フロー動作確認
 - [ ] Google OAuth の本番ドメイン登録
@@ -362,6 +382,7 @@ REDISH_SFA/
 |------|---------|--------|
 | 2025-12-19 | 初版作成（ドキュメント整理・PROJECT_CONTROL.md作成） | - |
 | 2026-01-05 | セキュリティ強化完了（anon RLS削除、API認証ガード）、実装済み機能ステータス更新 | - |
+| 2026-01-05 | UIベースSDD開発手法テンプレート適用、全spec Validation完了 | - |
 
 ---
 
