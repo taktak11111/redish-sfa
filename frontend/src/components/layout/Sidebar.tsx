@@ -242,7 +242,7 @@ export function Sidebar() {
             </div>
           )}
         </div>
-        {session && !isCollapsed && !isMedium && (
+        {!isCollapsed && !isMedium && (
           <button
             onClick={() => signOut({ callbackUrl: '/' })}
             className="mt-3 w-full btn-outline text-sm"
