@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { requireAuth, isAuthError } from '@/lib/auth/guard'
 
 // Supabase設定
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -41,6 +42,12 @@ function toCamelCase(record: any) {
 
 // GET: 架電履歴を取得
 export async function GET(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     const supabase = getSupabaseClient()
     const searchParams = request.nextUrl.searchParams
@@ -94,6 +101,12 @@ export async function GET(request: NextRequest) {
 
 // POST: 架電履歴を追加
 export async function POST(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     const supabase = getSupabaseClient()
     const body = await request.json()
@@ -162,6 +175,12 @@ export async function POST(request: NextRequest) {
 
 // DELETE: 架電履歴を削除
 export async function DELETE(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     const supabase = getSupabaseClient()
     const searchParams = request.nextUrl.searchParams

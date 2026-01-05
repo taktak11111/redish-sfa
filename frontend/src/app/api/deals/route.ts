@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { requireAuth, isAuthError } from '@/lib/auth/guard'
 
 // Supabase設定
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -144,6 +145,12 @@ function toSnakeCase(data: any) {
 
 // GET: 商談一覧を取得
 export async function GET(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     const supabase = getSupabaseClient()
     const searchParams = request.nextUrl.searchParams
@@ -181,6 +188,12 @@ export async function GET(request: NextRequest) {
 
 // POST: 新規商談を作成
 export async function POST(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     const supabase = getSupabaseClient()
     const body = await request.json()
@@ -221,6 +234,12 @@ export async function POST(request: NextRequest) {
 
 // PATCH: 商談を更新
 export async function PATCH(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     const supabase = getSupabaseClient()
     const body = await request.json()

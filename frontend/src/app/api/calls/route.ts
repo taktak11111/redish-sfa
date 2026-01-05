@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { CallStatus } from '@/types/sfa'
+import { requireAuth, isAuthError } from '@/lib/auth/guard'
 
 // Supabase設定
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -138,6 +139,12 @@ function toSnakeCase(data: any) {
 
 // GET: 架電記録一覧を取得
 export async function GET(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     console.log('[API/calls] Connecting to Supabase...')
     const supabase = getSupabaseClient()
@@ -179,6 +186,12 @@ export async function GET(request: NextRequest) {
 
 // POST: 新規架電記録を作成
 export async function POST(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     const supabase = getSupabaseClient()
     const body = await request.json()
@@ -210,6 +223,12 @@ export async function POST(request: NextRequest) {
 
 // PATCH: 架電記録を更新
 export async function PATCH(request: NextRequest) {
+  // 認証チェック
+  const authResult = await requireAuth()
+  if (isAuthError(authResult)) {
+    return authResult
+  }
+
   try {
     const supabase = getSupabaseClient()
     const body = await request.json()
