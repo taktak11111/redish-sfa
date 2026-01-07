@@ -1,0 +1,10 @@
+{
+  "crons": [
+    {
+      "path": "/api/spreadsheet/sync-scheduled",
+      "schedule": "0 0-17 * * 1-5"
+    }
+  ]
+}
+
+

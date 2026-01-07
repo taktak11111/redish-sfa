@@ -27,6 +27,17 @@ interface ColumnMapping {
   targetField: string
 }
 
+// インデックスから列名を生成（A, B, ..., Z, AA, AB, ..., AZ, BA, ...）
+function getColumnLetter(index: number): string {
+  let result = ''
+  let n = index
+  while (n >= 0) {
+    result = String.fromCharCode((n % 26) + 65) + result
+    n = Math.floor(n / 26) - 1
+  }
+  return result
+}
+
 // フィールド名をスネークケースに変換するマッピング
 const FIELD_TO_SNAKE: Record<string, string> = {
   leadId: 'lead_id',
@@ -65,10 +76,64 @@ const LEAD_SOURCE_PREFIX: Record<string, string> = {
 // Google Sheets APIキー（オプション - 公開シートならなくても可）
 const GOOGLE_API_KEY = process.env.GOOGLE_SHEETS_API_KEY
 
+// シート名からgidを取得する（公開スプレッドシート用）
+async function getSheetGid(spreadsheetId: string, sheetName: string): Promise<number | null> {
+  try {
+    // スプレッドシートのHTMLを取得してgidを抽出
+    const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    })
+    
+    if (!response.ok) {
+      console.log('[getSheetGid] Failed to fetch spreadsheet HTML')
+      return null
+    }
+    
+    const html = await response.text()
+    
+    // シート名とgidのマッピングを探す（複数パターン対応）
+    // パターン1: "name":"シート名","index":0,"gid":12345
+    const pattern1 = new RegExp(`"name":"${sheetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^}]*"gid":(\\d+)`, 'i')
+    const match1 = html.match(pattern1)
+    if (match1) {
+      console.log(`[getSheetGid] Found gid ${match1[1]} for sheet "${sheetName}"`)
+      return parseInt(match1[1], 10)
+    }
+    
+    // パターン2: gid=数字 と シート名の組み合わせを探す
+    const gidPattern = /gid=(\d+)/g
+    const gids: number[] = []
+    let gidMatch
+    while ((gidMatch = gidPattern.exec(html)) !== null) {
+      gids.push(parseInt(gidMatch[1], 10))
+    }
+    
+    if (gids.length > 0) {
+      console.log(`[getSheetGid] Found gids in HTML: ${gids.slice(0, 5).join(', ')}...`)
+    }
+    
+    // シート名がHTMLに含まれているか確認
+    if (html.includes(sheetName)) {
+      console.log(`[getSheetGid] Sheet name "${sheetName}" found in HTML, returning first non-zero gid or 0`)
+      // 最初のgidを返す（0以外を優先）
+      return gids.find(g => g !== 0) ?? gids[0] ?? null
+    }
+    
+    return null
+  } catch (error) {
+    console.error('[getSheetGid] Error:', error)
+    return null
+  }
+}
+
 // スプレッドシートからデータを取得する（公開シート用）
-async function fetchSpreadsheetData(spreadsheetId: string, sheetName: string = 'Sheet1'): Promise<string[][]> {
+async function fetchSpreadsheetData(spreadsheetId: string, sheetName: string = 'Sheet1', sheetGid?: string): Promise<string[][]> {
   // 方法1: Google Sheets API v4 (APIキーがある場合)
   if (GOOGLE_API_KEY) {
+    console.log('[fetchSpreadsheetData] Using Google Sheets API with API key')
     const range = encodeURIComponent(`${sheetName}!A:ZZ`)
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?key=${GOOGLE_API_KEY}`
     
@@ -83,9 +148,27 @@ async function fetchSpreadsheetData(spreadsheetId: string, sheetName: string = '
   }
   
   // 方法2: CSV エクスポートURL（公開シート用、APIキー不要）
-  // gid=0 はデフォルトで最初のシート
-  // シート名からgidを特定するのは難しいので、基本的に最初のシートを使用
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`
+  console.log(`[fetchSpreadsheetData] Using CSV export for sheet: "${sheetName}", providedGid: ${sheetGid || 'none'}`)
+  
+  // gidの決定（優先順位: 直接指定 > シート名から自動取得 > デフォルト0）
+  let gid = 0
+  if (sheetGid) {
+    // gidが直接指定されている場合はそれを使用
+    gid = parseInt(sheetGid, 10)
+    console.log(`[fetchSpreadsheetData] Using provided gid=${gid}`)
+  } else if (sheetName && sheetName !== 'Sheet1') {
+    // シート名からgidを自動取得
+    const foundGid = await getSheetGid(spreadsheetId, sheetName)
+    if (foundGid !== null) {
+      gid = foundGid
+      console.log(`[fetchSpreadsheetData] Auto-detected gid=${gid} for sheet "${sheetName}"`)
+    } else {
+      console.log(`[fetchSpreadsheetData] Could not find gid for sheet "${sheetName}", using gid=0`)
+    }
+  }
+  
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`
+  console.log(`[fetchSpreadsheetData] CSV URL: ${csvUrl}`)
   
   const response = await fetch(csvUrl)
   if (!response.ok) {
@@ -93,48 +176,72 @@ async function fetchSpreadsheetData(spreadsheetId: string, sheetName: string = '
   }
   
   const csvText = await response.text()
+  console.log(`[fetchSpreadsheetData] CSV text length: ${csvText.length} chars`)
+  
   return parseCSV(csvText)
 }
 
-// シンプルなCSVパーサー
+// 改良版CSVパーサー（複数行セル対応）
 function parseCSV(csvText: string): string[][] {
   const rows: string[][] = []
-  const lines = csvText.split(/\r?\n/)
+  let currentRow: string[] = []
+  let currentCell = ''
+  let inQuotes = false
   
-  for (const line of lines) {
-    if (line.trim() === '') continue
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i]
+    const nextChar = csvText[i + 1]
     
-    const cells: string[] = []
-    let current = ''
-    let inQuotes = false
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i]
-      
-      if (char === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          current += '"'
-          i++
-        } else {
-          inQuotes = !inQuotes
-        }
-      } else if (char === ',' && !inQuotes) {
-        cells.push(current.trim())
-        current = ''
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        // エスケープされたダブルクォート
+        currentCell += '"'
+        i++
       } else {
-        current += char
+        // クォートの開始/終了
+        inQuotes = !inQuotes
       }
+    } else if (char === ',' && !inQuotes) {
+      // セルの区切り
+      currentRow.push(currentCell.trim())
+      currentCell = ''
+    } else if ((char === '\r' || char === '\n') && !inQuotes) {
+      // 行の区切り（クォート外）
+      if (char === '\r' && nextChar === '\n') {
+        i++ // \r\n の場合、\n をスキップ
+      }
+      if (currentCell || currentRow.length > 0) {
+        currentRow.push(currentCell.trim())
+        // 空行も含めてすべての行を保持（ヘッダー行の位置を正確に保持するため）
+        rows.push(currentRow)
+        currentRow = []
+        currentCell = ''
+      }
+    } else {
+      // 通常の文字（改行もクォート内なら追加）
+      currentCell += char
     }
-    cells.push(current.trim())
-    rows.push(cells)
   }
+  
+  // 最後のセル/行を処理
+  if (currentCell || currentRow.length > 0) {
+    currentRow.push(currentCell.trim())
+    // 空行も含めてすべての行を保持（ヘッダー行の位置を正確に保持するため）
+    rows.push(currentRow)
+  }
+  
+  console.log(`[CSV Parser] Parsed ${rows.length} rows, max columns: ${Math.max(...rows.map(r => r.length), 0)}`)
+  console.log(`[CSV Parser] First 3 rows preview:`)
+  rows.slice(0, Math.min(3, rows.length)).forEach((row, idx) => {
+    console.log(`  Row ${idx}: [${row.slice(0, 3).join(', ')}...] (length: ${row.length})`)
+  })
   
   return rows
 }
 
 // リードIDを生成
-async function generateLeadId(supabase: SupabaseClient, leadSource: string): Promise<string> {
-  const prefix = LEAD_SOURCE_PREFIX[leadSource] || 'RD'
+async function generateLeadId(supabase: SupabaseClient, leadSource: string, customPrefix?: string): Promise<string> {
+  const prefix = customPrefix || LEAD_SOURCE_PREFIX[leadSource] || 'RD'
   
   // 同じプレフィックスの最大IDを取得
   const { data } = await supabase
@@ -162,30 +269,57 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const spreadsheetId = searchParams.get('spreadsheetId')
     const sheetName = searchParams.get('sheetName') || 'Sheet1'
+    const sheetGid = searchParams.get('sheetGid') || undefined  // シートgid（オプション）
     const action = searchParams.get('action')
+    const headerRow = parseInt(searchParams.get('headerRow') || '1', 10) // デフォルトは1行目
     
     if (!spreadsheetId) {
       return NextResponse.json({ error: 'スプレッドシートIDが必要です' }, { status: 400 })
     }
     
-    console.log(`[API/spreadsheet] Fetching data from spreadsheet: ${spreadsheetId}`)
+    console.log(`[API/spreadsheet] Fetching data from spreadsheet: ${spreadsheetId}, sheetName: ${sheetName}, gid: ${sheetGid || 'auto'}, headerRow: ${headerRow}`)
     
-    const data = await fetchSpreadsheetData(spreadsheetId, sheetName)
+    const data = await fetchSpreadsheetData(spreadsheetId, sheetName, sheetGid)
     
     if (data.length === 0) {
       return NextResponse.json({ error: 'スプレッドシートにデータがありません' }, { status: 400 })
     }
     
-    if (action === 'headers') {
-      // ヘッダー行のみ返す
-      return NextResponse.json({ headers: data[0] })
+    // ヘッダー行のインデックス（1-indexed → 0-indexed）
+    const headerIndex = Math.max(0, headerRow - 1)
+    
+    console.log(`[API/spreadsheet] headerRow: ${headerRow}, headerIndex: ${headerIndex}, data.length: ${data.length}`)
+    console.log(`[API/spreadsheet] First 5 rows preview:`)
+    data.slice(0, Math.min(5, data.length)).forEach((row, idx) => {
+      console.log(`  Row ${idx}: [${row.slice(0, 5).join(', ')}...]`)
+    })
+    
+    if (headerIndex >= data.length) {
+      return NextResponse.json({ error: `指定されたヘッダー行（${headerRow}行目）が存在しません` }, { status: 400 })
     }
     
-    // 全データを返す
+    if (action === 'headers') {
+      // ヘッダー行とサンプルデータ行（ヘッダー行の次の行）を返す
+      const sampleRowIndex = headerIndex + 1
+      const sampleRow = sampleRowIndex < data.length ? data[sampleRowIndex] : []
+      
+      console.log(`[API/spreadsheet] Returning headers from index ${headerIndex}: [${data[headerIndex].slice(0, 5).join(', ')}...]`)
+      console.log(`[API/spreadsheet] Returning sampleRow from index ${sampleRowIndex}: [${sampleRow.slice(0, 5).join(', ')}...]`)
+      
+      return NextResponse.json({ 
+        headers: data[headerIndex],
+        sampleRow: sampleRow,
+        headerRow: headerRow,
+        totalRows: data.length
+      })
+    }
+    
+    // 全データを返す（ヘッダー行より後のデータ）
     return NextResponse.json({
-      headers: data[0],
-      rows: data.slice(1),
-      totalRows: data.length - 1,
+      headers: data[headerIndex],
+      rows: data.slice(headerIndex + 1),
+      totalRows: data.length - headerIndex - 1,
+      headerRow: headerRow,
     })
     
   } catch (error: any) {
@@ -201,10 +335,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { spreadsheetId, sheetName = 'Sheet1', columnMappings } = body as {
+    const { spreadsheetId, sheetName = 'Sheet1', sheetGid, columnMappings, headerRow = 1, leadSourcePrefix } = body as {
       spreadsheetId: string
       sheetName: string
+      sheetGid?: string
       columnMappings: ColumnMapping[]
+      headerRow?: number
+      leadSourcePrefix?: string
     }
     
     if (!spreadsheetId) {
@@ -215,22 +352,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'カラムマッピングが必要です' }, { status: 400 })
     }
     
-    console.log(`[API/spreadsheet] Importing data from spreadsheet: ${spreadsheetId}`)
+    console.log(`[API/spreadsheet] Importing data from spreadsheet: ${spreadsheetId}, gid: ${sheetGid || 'auto'}, headerRow: ${headerRow}`)
     
     // スプレッドシートからデータを取得
-    const data = await fetchSpreadsheetData(spreadsheetId, sheetName)
+    const data = await fetchSpreadsheetData(spreadsheetId, sheetName, sheetGid)
     
-    if (data.length <= 1) {
+    // ヘッダー行のインデックス（1-indexed → 0-indexed）
+    const headerIndex = Math.max(0, headerRow - 1)
+    
+    if (data.length <= headerIndex + 1) {
       return NextResponse.json({ error: 'インポートするデータがありません' }, { status: 400 })
     }
     
-    const headers = data[0]
-    const rows = data.slice(1)
+    const headers = data[headerIndex]
+    const rows = data.slice(headerIndex + 1)
     
-    // カラムインデックスのマッピングを作成
+    // カラムインデックスのマッピングを作成（A-Z, AA-AZ, BA-BZ...対応）
     const columnIndexMap: Record<string, number> = {}
     headers.forEach((header, index) => {
-      columnIndexMap[String.fromCharCode(65 + index)] = index
+      columnIndexMap[getColumnLetter(index)] = index
     })
     
     const supabase = getSupabaseClient()
@@ -305,7 +445,7 @@ export async function POST(request: NextRequest) {
         } else {
           // 新規レコードを作成
           recordData.lead_source = leadSource
-          recordData.lead_id = await generateLeadId(supabase, leadSource)
+          recordData.lead_id = await generateLeadId(supabase, leadSource, leadSourcePrefix)
           recordData.linked_date = recordData.linked_date || new Date().toISOString().split('T')[0]
           
           const { error: insertError } = await supabase

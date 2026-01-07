@@ -79,6 +79,7 @@ function toCamelCase(record: any) {
     nextActionCompleted: record.next_action_completed,
     appointmentDate: record.appointment_date,
     dealSetupDate: record.deal_setup_date,
+    linkedAt: record.linked_at,
     dealTime: record.deal_time,
     dealStaffFS: record.deal_staff_fs,
     dealResult: record.deal_result,
@@ -130,6 +131,7 @@ function toSnakeCase(data: any) {
   if (data.nextActionCompleted !== undefined) result.next_action_completed = data.nextActionCompleted
   if (data.appointmentDate !== undefined) result.appointment_date = data.appointmentDate
   if (data.dealSetupDate !== undefined) result.deal_setup_date = data.dealSetupDate
+  if (data.linkedAt !== undefined) result.linked_at = data.linkedAt
   if (data.dealTime !== undefined) result.deal_time = data.dealTime
   if (data.dealStaffFS !== undefined) result.deal_staff_fs = data.dealStaffFS
   if (data.dealResult !== undefined) result.deal_result = data.dealResult

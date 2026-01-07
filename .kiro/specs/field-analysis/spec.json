@@ -1,0 +1,6 @@
+{
+  "id": "field-analysis",
+  "name": "フィールド営業分析機能",
+  "status": "requirements",
+  "description": "フィールド担当者別の訪問数、商談化率、成約率などを可視化する機能"
+}

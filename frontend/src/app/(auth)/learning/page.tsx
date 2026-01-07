@@ -13,7 +13,7 @@ export default function LearningCenterPage() {
         </div>
         
         <h1 className="text-2xl font-bold text-gray-900 mb-2">
-          学習センター
+          ナレッジセンター
         </h1>
         
         <div className="flex items-center justify-center gap-2 mb-4">
@@ -31,7 +31,7 @@ export default function LearningCenterPage() {
           現在開発中のため、もうしばらくお待ちください。
         </p>
         
-        <div className="bg-white rounded-lg border border-gray-200 p-4 text-left">
+        <div className="bg-white rounded-lg border border-gray-200 p-4 text-left mb-6">
           <h3 className="text-sm font-semibold text-gray-900 mb-2">実装予定の機能</h3>
           <ul className="text-sm text-gray-600 space-y-1">
             <li>• 学習コンテンツ一覧</li>
@@ -42,7 +42,7 @@ export default function LearningCenterPage() {
           </ul>
         </div>
         
-        <div className="mt-6 bg-blue-50 rounded-lg border border-blue-200 p-4 text-left">
+        <div className="bg-blue-50 rounded-lg border border-blue-200 p-4 text-left mb-6">
           <h3 className="text-sm font-semibold text-blue-900 mb-2">📚 学習カテゴリ</h3>
           <div className="grid grid-cols-3 gap-2 text-xs">
             <div className="bg-white rounded p-2 text-center">
@@ -59,14 +59,18 @@ export default function LearningCenterPage() {
             </div>
           </div>
         </div>
+
+        <a
+          href="/manual"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors"
+          style={{ backgroundColor: '#0083a0' }}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+          </svg>
+          ユーザーマニュアルを見る
+        </a>
       </div>
     </div>
   )
 }
-
-
-
-
-
-
-

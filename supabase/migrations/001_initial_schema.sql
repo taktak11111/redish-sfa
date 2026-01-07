@@ -274,3 +274,10 @@ UPDATE deals SET result = '01.成約（契約締結）', result_date = '2024-02-
 SELECT 'call_records' as table_name, COUNT(*) as count FROM call_records
 UNION ALL
 SELECT 'deals' as table_name, COUNT(*) as count FROM deals;
+
+
+
+
+
+
+

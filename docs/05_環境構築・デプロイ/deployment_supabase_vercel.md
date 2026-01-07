@@ -632,3 +632,8 @@ Supabase Dashboard > Authentication > URL Configuration:
 2. **Supabase Edge Functions**: 複雑なビジネスロジックを Edge Functions で実装
 3. **Realtime**: Supabase Realtime でリアルタイム同期を実装
 4. **Storage**: 添付ファイル機能を Supabase Storage で実装
+
+
+
+
+

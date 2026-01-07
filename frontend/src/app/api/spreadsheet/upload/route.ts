@@ -27,6 +27,17 @@ interface ColumnMapping {
   targetField: string
 }
 
+// インデックスから列名を生成（A, B, ..., Z, AA, AB, ..., AZ, BA, ...）
+function getColumnLetter(index: number): string {
+  let result = ''
+  let n = index
+  while (n >= 0) {
+    result = String.fromCharCode((n % 26) + 65) + result
+    n = Math.floor(n / 26) - 1
+  }
+  return result
+}
+
 // フィールド名をスネークケースに変換するマッピング
 const FIELD_TO_SNAKE: Record<string, string> = {
   leadId: 'lead_id',
@@ -160,10 +171,10 @@ export async function POST(request: NextRequest) {
     const headers = data[0]
     const rows = data.slice(1)
     
-    // カラムインデックスのマッピングを作成
+    // カラムインデックスのマッピングを作成（A-Z, AA-AZ, BA-BZ...対応）
     const columnIndexMap: Record<string, number> = {}
     headers.forEach((header, index) => {
-      columnIndexMap[String.fromCharCode(65 + index)] = index
+      columnIndexMap[getColumnLetter(index)] = index
     })
     
     const supabase = getSupabaseClient()

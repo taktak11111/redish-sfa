@@ -75,6 +75,8 @@ function toCamelCase(record: any) {
     detailRank: record.detail_rank,
     result: record.result,
     resultDate: record.result_date,
+    dealDate: record.deal_date,
+    amount: record.amount,
     lostFactor: record.lost_factor,
     lostReason: record.lost_reason,
     lostAfterAction: record.lost_after_action,
@@ -135,6 +137,8 @@ function toSnakeCase(data: any) {
   if (data.detailRank !== undefined) result.detail_rank = data.detailRank
   if (data.result !== undefined) result.result = data.result
   if (data.resultDate !== undefined) result.result_date = data.resultDate
+  if (data.dealDate !== undefined) result.deal_date = data.dealDate
+  if (data.amount !== undefined) result.amount = data.amount
   if (data.lostFactor !== undefined) result.lost_factor = data.lostFactor
   if (data.lostReason !== undefined) result.lost_reason = data.lostReason
   if (data.lostAfterAction !== undefined) result.lost_after_action = data.lostAfterAction

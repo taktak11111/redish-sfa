@@ -1,0 +1,6 @@
+{
+  "id": "sales-analysis",
+  "name": "売上分析機能",
+  "status": "requirements",
+  "description": "売上の月次推移、成約単価、予算達成率などを可視化する機能"
+}
