@@ -3,14 +3,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Deal, CallRecord, LostReason, DealRank } from '@/types/sfa'
+import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
 
 export default function FieldAnalysisPage() {
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date()
-    d.setMonth(d.getMonth() - 1)
-    return d.toISOString().split('T')[0]
-  })
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [dateRange, setDateRange] = useState<DateRange | null>(null)
 
   const { data: dealsData, isLoading: dealsLoading } = useQuery({
     queryKey: ['deals'],
@@ -32,15 +28,17 @@ export default function FieldAnalysisPage() {
 
   const isLoading = dealsLoading || callsLoading
   const deals = (dealsData?.data as Deal[] || []).filter(deal => {
-    if (!deal.dealDate) return false
+    if (!deal.dealDate || !dateRange) return false
     const dealDate = new Date(deal.dealDate)
-    return dealDate >= new Date(startDate) && dealDate <= new Date(endDate)
+    dealDate.setHours(0, 0, 0, 0)
+    return dealDate >= dateRange.start && dealDate <= dateRange.end
   })
 
   const calls = (callsData?.data as CallRecord[] || []).filter(call => {
-    if (!call.linkedAt) return false
+    if (!call.linkedAt || !dateRange) return false
     const linkedDate = new Date(call.linkedAt)
-    return linkedDate >= new Date(startDate) && linkedDate <= new Date(endDate)
+    linkedDate.setHours(0, 0, 0, 0)
+    return linkedDate >= dateRange.start && linkedDate <= dateRange.end
   })
 
   // 統計を計算
@@ -86,33 +84,15 @@ export default function FieldAnalysisPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">フィールド分析</h1>
-        <p className="mt-1 text-sm text-gray-500">営業担当者別・期間別のパフォーマンス分析</p>
-      </div>
-
-      {/* 期間フィルター */}
-      <div className="card p-4">
-        <div className="flex flex-col sm:flex-row gap-4 items-end">
-          <div>
-            <label className="label">開始日</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="input"
-            />
-          </div>
-          <div>
-            <label className="label">終了日</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="input"
-            />
-          </div>
+      <div className="flex justify-between items-end flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">フィールド分析</h1>
+          <p className="mt-1 text-sm text-gray-500">営業担当者別・期間別のパフォーマンス分析</p>
         </div>
+        <DateRangeFilter
+          defaultPreset="thisMonth"
+          onChange={setDateRange}
+        />
       </div>
 
       {/* サマリーカード */}

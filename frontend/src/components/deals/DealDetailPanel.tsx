@@ -632,21 +632,6 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                 />
               </div>
               <div>
-                <label className="label">対応済</label>
-                <select
-                  value={formData.actionCompleted || ''}
-                  onChange={(e) => handleChange('actionCompleted', e.target.value)}
-                  className="input"
-                >
-                  <option value="">選択してください</option>
-                  {getDropdownOptions('nextActionCompleted').map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <label className="label">顧客BANT情報</label>
                 <textarea 
                   value={formData.customerBANTInfo || ''} 

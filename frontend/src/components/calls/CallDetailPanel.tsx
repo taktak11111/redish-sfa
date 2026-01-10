@@ -41,11 +41,10 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
     resultContactStatus: getDropdownOptions('resultContactStatus'),
     actionOutsideCall: getDropdownOptions('actionOutsideCall'),
     nextActionContent: getDropdownOptions('nextActionContent'),
-    nextActionSupplement: getDropdownOptions('nextActionSupplement'),
-    nextActionCompleted: getDropdownOptions('nextActionCompleted'),
     dealStaffFS: getDropdownOptions('dealStaffFS'),
     dealResult: getDropdownOptions('dealResult'),
     lostReasonFS: getDropdownOptions('lostReasonFS'),
+    openingPeriod: getDropdownOptions('openingPeriod'),
   })
 
   useEffect(() => {
@@ -62,11 +61,10 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
         resultContactStatus: getDropdownOptions('resultContactStatus'),
         actionOutsideCall: getDropdownOptions('actionOutsideCall'),
         nextActionContent: getDropdownOptions('nextActionContent'),
-        nextActionSupplement: getDropdownOptions('nextActionSupplement'),
-        nextActionCompleted: getDropdownOptions('nextActionCompleted'),
         dealStaffFS: getDropdownOptions('dealStaffFS'),
         dealResult: getDropdownOptions('dealResult'),
         lostReasonFS: getDropdownOptions('lostReasonFS'),
+        openingPeriod: getDropdownOptions('openingPeriod'),
       })
     }
     
@@ -313,12 +311,18 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
               </div>
               <div>
                 <label className="label">開業時期</label>
-                <input 
-                  type="text" 
-                  value={formData.openingDate || ''} 
+                <select
+                  value={formData.openingDate || ''}
                   onChange={(e) => handleChange('openingDate', e.target.value)}
                   className="input"
-                />
+                >
+                  <option value="">選択してください</option>
+                  {dropdownSettings.openingPeriod.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="label">連絡希望日時</label>
@@ -748,36 +752,6 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                 >
                   <option value="">選択してください</option>
                   {dropdownSettings.nextActionContent.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">ネクストアクション補足</label>
-                <select
-                  value={formData.nextActionSupplement || ''}
-                  onChange={(e) => handleChange('nextActionSupplement', e.target.value)}
-                  className="input"
-                >
-                  <option value="">選択してください</option>
-                  {dropdownSettings.nextActionSupplement.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">実施</label>
-                <select
-                  value={formData.nextActionCompleted || ''}
-                  onChange={(e) => handleChange('nextActionCompleted', e.target.value)}
-                  className="input"
-                >
-                  <option value="">選択してください</option>
-                  {dropdownSettings.nextActionCompleted.map(option => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

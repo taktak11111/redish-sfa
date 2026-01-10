@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CallRecord, CallStatus } from '@/types/sfa'
-import { CallDetailPanel } from '@/components/calls/CallDetailPanel'
+import { LeadDetailPanel } from '@/components/leads/LeadDetailPanel'
+import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
 
 const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [
   { value: '未架電', label: '未架電', color: 'badge-gray' },
@@ -28,8 +29,10 @@ export default function LeadsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterSource, setFilterSource] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedRecord, setSelectedRecord] = useState<CallRecord | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
+  const [isSourceCardExpanded, setIsSourceCardExpanded] = useState(false)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
     leadId: 100,
     linkedDate: 120,
@@ -113,8 +116,59 @@ export default function LeadsPage() {
       record.phone?.includes(searchTerm) ||
       record.leadId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       record.email?.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesStatus && matchesSource && matchesSearch
+    
+    // 期間フィルタ
+    let matchesDateRange = true
+    if (dateRange && record.linkedDate) {
+      const recordDate = new Date(record.linkedDate)
+      recordDate.setHours(0, 0, 0, 0)
+      matchesDateRange = recordDate >= dateRange.start && recordDate <= dateRange.end
+    }
+    
+    return matchesStatus && matchesSource && matchesSearch && matchesDateRange
   })
+
+  // リードソース別の件数をカウント（フィルタ前の全データから、期間・ステータス・検索のみ適用）
+  const sourceCountsData = useMemo(() => {
+    const allRecords = data?.data as CallRecord[] || []
+    
+    // 期間・ステータス・検索フィルタのみ適用（リードソースフィルタは除外）
+    const baseFilteredRecords = allRecords.filter(record => {
+      const matchesStatus = filterStatus === 'all' || record.status === filterStatus
+      const matchesSearch = searchTerm === '' || 
+        record.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        record.contactName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        record.phone?.includes(searchTerm) ||
+        record.leadId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        record.email?.toLowerCase().includes(searchTerm.toLowerCase())
+      
+      let matchesDateRange = true
+      if (dateRange && record.linkedDate) {
+        const recordDate = new Date(record.linkedDate)
+        recordDate.setHours(0, 0, 0, 0)
+        matchesDateRange = recordDate >= dateRange.start && recordDate <= dateRange.end
+      }
+      
+      return matchesStatus && matchesSearch && matchesDateRange
+    })
+
+    // リードソース別にカウント
+    const counts: Record<string, number> = {}
+    baseFilteredRecords.forEach(record => {
+      const source = record.leadSource || '不明'
+      counts[source] = (counts[source] || 0) + 1
+    })
+
+    // 件数順にソート
+    const sorted = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([source, count]) => ({ source, count }))
+
+    return {
+      total: baseFilteredRecords.length,
+      sources: sorted,
+    }
+  }, [data?.data, filterStatus, searchTerm, dateRange])
 
   const handleRowClick = (record: CallRecord) => {
     setSelectedRecord(record)
@@ -166,6 +220,12 @@ export default function LeadsPage() {
         </div>
 
         <div className="card p-4 mb-4">
+          <div className="mb-4 flex justify-end">
+            <DateRangeFilter
+              defaultPreset="thisMonth"
+              onChange={setDateRange}
+            />
+          </div>
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
               <input
@@ -215,6 +275,93 @@ export default function LeadsPage() {
               <span className="badge badge-gray">{STATUS_OPTIONS.find(s => s.value === filterStatus)?.label}</span>
             )}
           </div>
+        </div>
+
+        {/* リードソース別件数カード */}
+        <div className="card p-4 mb-4">
+          <button
+            type="button"
+            onClick={() => setIsSourceCardExpanded(!isSourceCardExpanded)}
+            className="w-full flex items-center justify-between text-left"
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-gray-700">リードソース別</span>
+              <span className="text-sm text-gray-500">計 {sourceCountsData.total} 件</span>
+              {!isSourceCardExpanded && (
+                <div className="flex items-center gap-2 ml-2">
+                  {sourceCountsData.sources.slice(0, 4).map(({ source, count }) => (
+                    <button
+                      key={source}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setFilterSource(filterSource === source ? 'all' : source)
+                      }}
+                      className={`px-2 py-1 text-xs rounded-full transition-colors ${
+                        filterSource === source
+                          ? 'bg-[#0083a0] text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {source} ({count})
+                    </button>
+                  ))}
+                  {sourceCountsData.sources.length > 4 && (
+                    <span className="text-xs text-gray-400">
+                      +{sourceCountsData.sources.length - 4}件
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform duration-200 ${isSourceCardExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+
+          {isSourceCardExpanded && (
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                {sourceCountsData.sources.map(({ source, count }) => (
+                  <button
+                    key={source}
+                    type="button"
+                    onClick={() => setFilterSource(filterSource === source ? 'all' : source)}
+                    className={`px-3 py-2 rounded-lg border-2 text-center transition-all shadow-sm hover:shadow ${
+                      filterSource === source
+                        ? 'border-[#0083a0] bg-gradient-to-b from-[#e6f7fa] to-[#d0f0f5] shadow-md'
+                        : 'border-gray-200 bg-gradient-to-b from-white to-gray-50 hover:border-[#0083a0]/50'
+                    }`}
+                  >
+                    <div className={`flex items-baseline justify-center gap-0.5 ${filterSource === source ? 'text-[#0083a0]' : 'text-gray-900'}`}>
+                      <span className="text-2xl font-bold">{count}</span>
+                      <span className="text-xs text-gray-400">件</span>
+                    </div>
+                    <div className={`text-xs truncate mt-1 ${filterSource === source ? 'text-[#0083a0] font-medium' : 'text-gray-500'}`}>
+                      {source}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {filterSource !== 'all' && (
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setFilterSource('all')}
+                    className="text-xs text-gray-500 hover:text-gray-700 underline"
+                  >
+                    フィルタをクリア
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -331,7 +478,7 @@ export default function LeadsPage() {
       </div>
 
       {isPanelOpen && selectedRecord && (
-        <CallDetailPanel
+        <LeadDetailPanel
           record={selectedRecord}
           onClose={handlePanelClose}
           onSave={handlePanelSave}

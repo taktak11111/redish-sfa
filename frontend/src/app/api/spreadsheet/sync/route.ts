@@ -109,7 +109,8 @@ const FIELD_TO_SNAKE: Record<string, string> = {
   phone: 'phone',
   email: 'email',
   address: 'address',
-  openingDate: 'opening_date',
+  openingDateOriginal: 'opening_date_original', // 連携元から入力（自由記述）
+  openingDate: 'opening_date', // ヒアリング後に選択式で入力
   contactPreferredDateTime: 'contact_preferred_datetime',
   allianceRemarks: 'alliance_remarks',
   omcAdditionalInfo1: 'omc_additional_info1',

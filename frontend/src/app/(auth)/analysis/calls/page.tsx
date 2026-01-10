@@ -6,6 +6,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
   ComposedChart, Line
 } from 'recharts'
+import { format } from 'date-fns'
+import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
 
 interface CallAnalysisData {
   summary: {
@@ -39,16 +41,24 @@ interface CallAnalysisData {
 }
 
 export default function CallAnalysisPage() {
-  const [days, setDays] = useState(30)
+  const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [activeTab, setActiveTab] = useState<'staff' | 'channel'>('staff')
 
   const { data, isLoading, error } = useQuery<CallAnalysisData>({
-    queryKey: ['call-analysis', days],
+    queryKey: ['call-analysis', dateRange?.start?.toISOString(), dateRange?.end?.toISOString()],
     queryFn: async () => {
-      const response = await fetch(`/api/analysis/calls?days=${days}`)
+      const params = new URLSearchParams()
+      if (dateRange?.start) {
+        params.set('start', format(dateRange.start, 'yyyy-MM-dd'))
+      }
+      if (dateRange?.end) {
+        params.set('end', format(dateRange.end, 'yyyy-MM-dd'))
+      }
+      const response = await fetch(`/api/analysis/calls?${params.toString()}`)
       if (!response.ok) throw new Error('Failed to fetch call analysis data')
       return response.json()
     },
+    enabled: dateRange !== null,
   })
 
   if (error) return <div className="p-4 text-red-600">エラーが発生しました: {(error as Error).message}</div>
@@ -57,26 +67,15 @@ export default function CallAnalysisPage() {
 
   return (
     <div className="space-y-6 pb-12">
-      <div className="flex justify-between items-end">
+      <div className="flex justify-between items-end flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">架電分析</h1>
           <p className="mt-1 text-sm text-gray-500">インサイドセールスの活動量と成果の可視化</p>
         </div>
-        <div className="flex gap-2">
-          {[7, 14, 30, 90].map(d => (
-            <button
-              key={d}
-              onClick={() => setDays(d)}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                days === d 
-                  ? 'bg-[#0083a0] text-white shadow-sm' 
-                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              過去{d}日間
-            </button>
-          ))}
-        </div>
+        <DateRangeFilter
+          defaultPreset="thisMonth"
+          onChange={setDateRange}
+        />
       </div>
 
       {/* 主要KPIカード */}

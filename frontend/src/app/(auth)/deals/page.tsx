@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Deal, DealRank, DealResult } from '@/types/sfa'
 import { DealDetailPanel } from '@/components/deals/DealDetailPanel'
+import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
 
 const RANK_OPTIONS: { value: DealRank; label: string; color: string }[] = [
   { value: 'A:80%', label: 'A:80%', color: 'badge-success' },
@@ -23,6 +24,7 @@ export default function DealsPage() {
   const [filterRank, setFilterRank] = useState<string>('all')
   const [filterResult, setFilterResult] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
@@ -105,7 +107,16 @@ export default function DealsPage() {
       deal.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       ((deal as any).staff || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       dealId.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesRank && matchesResult && matchesSearch
+    
+    // 期間フィルタ（商談設定日を基準）
+    let matchesDateRange = true
+    if (dateRange && deal.dealSetupDate) {
+      const recordDate = new Date(deal.dealSetupDate)
+      recordDate.setHours(0, 0, 0, 0)
+      matchesDateRange = recordDate >= dateRange.start && recordDate <= dateRange.end
+    }
+    
+    return matchesRank && matchesResult && matchesSearch && matchesDateRange
   })
 
   const handleRowClick = (deal: Deal) => {
@@ -150,6 +161,12 @@ export default function DealsPage() {
         </div>
 
         <div className="card p-4 mb-4">
+          <div className="mb-4 flex justify-end">
+            <DateRangeFilter
+              defaultPreset="thisMonth"
+              onChange={setDateRange}
+            />
+          </div>
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
               <input

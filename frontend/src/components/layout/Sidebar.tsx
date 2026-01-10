@@ -240,7 +240,7 @@ export function Sidebar() {
                 {session?.user?.name || '開発ユーザー'}
               </p>
               <p className="text-xs text-gray-500 truncate">
-                {session?.user?.email || 'dev@example.com'}
+                {session?.user?.email || 'tmatsukuma@redish.jp'}
               </p>
             </div>
           )}

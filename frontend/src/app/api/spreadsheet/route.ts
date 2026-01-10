@@ -73,6 +73,22 @@ const LEAD_SOURCE_PREFIX: Record<string, string> = {
   REDISH: 'RD',
 }
 
+// リードソース別のマッピング定義（スプレッドシートのヘッダー名 → JSONB内のキー名）
+const SOURCE_SPECIFIC_MAPPINGS: Record<string, Record<string, string>> = {
+  OMC: {
+    'OMC追加情報①': 'additional_info1',
+    '⓶自己資金': 'self_funds',
+    '⓷物件状況': 'property_status',
+  },
+  TEMPOS: {
+    'OMC追加情報①': 'additional_info1', // TEMPOSも同じ構造
+    '⓶自己資金': 'self_funds',
+    '⓷物件状況': 'property_status',
+    // TEMPOS専用フィールドがあれば追加可能
+  },
+  // 他のリードソースも同様に定義可能
+}
+
 // Google Sheets APIキー（オプション - 公開シートならなくても可）
 const GOOGLE_API_KEY = process.env.GOOGLE_SHEETS_API_KEY
 
@@ -391,6 +407,7 @@ export async function POST(request: NextRequest) {
         }
         
         let leadSource = 'REDISH' // デフォルト
+        const sourceSpecificData: Record<string, any> = {} // リードソース別情報を格納
         
         for (const mapping of columnMappings) {
           if (!mapping.targetField) continue
@@ -405,8 +422,32 @@ export async function POST(request: NextRequest) {
             leadSource = value
           }
           
-          const snakeField = FIELD_TO_SNAKE[mapping.targetField] || mapping.targetField
-          recordData[snakeField] = value
+          // リードソース別情報のチェック
+          const sourceMapping = SOURCE_SPECIFIC_MAPPINGS[leadSource]
+          if (sourceMapping && mapping.spreadsheetHeader && sourceMapping[mapping.spreadsheetHeader]) {
+            // リードソース別情報はJSONBに保存
+            sourceSpecificData[sourceMapping[mapping.spreadsheetHeader]] = value
+          } else {
+            // 共通フィールドは通常カラムに保存
+            const snakeField = FIELD_TO_SNAKE[mapping.targetField] || mapping.targetField
+            recordData[snakeField] = value
+            
+            // 後方互換性: omc_*カラムにも保存（OMC/TEMPOSの場合）
+            if (leadSource === 'OMC' || leadSource === 'TEMPOS') {
+              if (mapping.targetField === 'omcAdditionalInfo1') {
+                recordData.omc_additional_info1 = value
+              } else if (mapping.targetField === 'omcSelfFunds') {
+                recordData.omc_self_funds = value
+              } else if (mapping.targetField === 'omcPropertyStatus') {
+                recordData.omc_property_status = value
+              }
+            }
+          }
+        }
+        
+        // source_specific_dataをJSONB形式で設定
+        if (Object.keys(sourceSpecificData).length > 0) {
+          recordData.source_specific_data = sourceSpecificData
         }
         
         // 必須チェック

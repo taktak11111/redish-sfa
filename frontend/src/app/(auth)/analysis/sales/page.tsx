@@ -7,6 +7,7 @@ import {
   LineChart, Line, ComposedChart, AreaChart, Area, Cell, PieChart, Pie
 } from 'recharts'
 import { format } from 'date-fns'
+import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
 
 interface AnalysisData {
   summary: {
@@ -36,15 +37,23 @@ interface AnalysisData {
 }
 
 export default function SalesAnalysisPage() {
-  const [months, setMonths] = useState(6)
+  const [dateRange, setDateRange] = useState<DateRange | null>(null)
 
   const { data, isLoading, error } = useQuery<AnalysisData>({
-    queryKey: ['sales-analysis', months],
+    queryKey: ['sales-analysis', dateRange?.start?.toISOString(), dateRange?.end?.toISOString()],
     queryFn: async () => {
-      const response = await fetch(`/api/analysis/sales?months=${months}`)
+      const params = new URLSearchParams()
+      if (dateRange?.start) {
+        params.set('start', format(dateRange.start, 'yyyy-MM-dd'))
+      }
+      if (dateRange?.end) {
+        params.set('end', format(dateRange.end, 'yyyy-MM-dd'))
+      }
+      const response = await fetch(`/api/analysis/sales?${params.toString()}`)
       if (!response.ok) throw new Error('Failed to fetch analysis data')
       return response.json()
     },
+    enabled: dateRange !== null,
   })
 
   if (error) return <div className="p-4 text-red-600">エラーが発生しました: {(error as Error).message}</div>
@@ -54,27 +63,15 @@ export default function SalesAnalysisPage() {
 
   return (
     <div className="space-y-6 pb-12">
-      <div className="flex justify-between items-end">
+      <div className="flex justify-between items-end flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">売上・成約分析</h1>
           <p className="mt-1 text-sm text-gray-500">成約パフォーマンスと収益推移の可視化</p>
         </div>
-        <div className="flex gap-2">
-          {[3, 6, 12].map(m => (
-            <button
-              key={m}
-              onClick={() => setMonths(m)}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                months === m 
-                  ? 'bg-[#0083a0] text-white shadow-sm' 
-                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }`}
-              disabled={isLoading}
-            >
-              過去{m}ヶ月
-            </button>
-          ))}
-        </div>
+        <DateRangeFilter
+          defaultPreset="thisMonth"
+          onChange={setDateRange}
+        />
       </div>
 
       {/* エラー表示 */}

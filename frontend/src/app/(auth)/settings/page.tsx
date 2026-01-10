@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { DropdownSettings, DropdownOption, DEFAULT_SETTINGS } from '@/lib/dropdownSettings'
 import { createClient } from '@/lib/supabase/client'
@@ -240,6 +240,28 @@ export default function SettingsPage() {
   
   // マッピング結果表示用のモーダル
   const [viewingMappingConfig, setViewingMappingConfig] = useState<SavedSpreadsheetConfig | null>(null)
+  // サイドパネル内で編集中のマッピング設定（ローカル編集用）
+  const [editingMappingInPanel, setEditingMappingInPanel] = useState<SavedSpreadsheetConfig | null>(null)
+  
+  // カスタムマッピングフィールド用のstate
+  const [customFields, setCustomFields] = useState<any[]>([])
+  const [isLoadingCustomFields, setIsLoadingCustomFields] = useState(false)
+  const [showCustomFieldModal, setShowCustomFieldModal] = useState(false)
+  const [newCustomField, setNewCustomField] = useState({ field_key: '', field_label: '', field_type: 'text' as 'text' | 'number' | 'date' | 'boolean', description: '' })
+  const [userRole, setUserRole] = useState<'admin' | 'manager' | 'staff' | null>(null)
+  const [pendingMappingIndex, setPendingMappingIndex] = useState<number | null>(null) // カスタムフィールド追加後にマッピングする列のインデックス
+  const [editingCustomFieldId, setEditingCustomFieldId] = useState<string | null>(null) // 編集中のカスタムフィールドID
+  
+  // 開発環境かどうかを判定（クライアントサイド）
+  const isDevelopment = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  
+  // ユーザー権限管理用のstate
+  const [users, setUsers] = useState<any[]>([])
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false)
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
+  const [editingUserRole, setEditingUserRole] = useState<'admin' | 'manager' | 'staff'>('staff')
+  const [showAddUserModal, setShowAddUserModal] = useState(false)
+  const [newUser, setNewUser] = useState({ email: '', full_name: '', role: 'staff' as 'admin' | 'manager' | 'staff', department: '' })
   
   // 連携データ表示用のstate
   const [importedRecords, setImportedRecords] = useState<any[]>([])
@@ -247,22 +269,73 @@ export default function SettingsPage() {
   const [recordsFilter, setRecordsFilter] = useState<string>('all') // リードソースでフィルタ
 
   useEffect(() => {
-    // ローカルストレージから設定を読み込む
-    const saved = localStorage.getItem('sfa-dropdown-settings')
-    if (saved) {
+    // データベースから設定を読み込む（フォールバック: localStorage）
+    const loadSettings = async () => {
       try {
-        const parsed = JSON.parse(saved)
-        setSettings(parsed)
-        setOriginalSettings(parsed)
-      } catch (e) {
-        console.error('Failed to load settings:', e)
+        const response = await fetch('/api/dropdown-settings')
+        if (response.ok) {
+          const { settings: dbSettings, raw } = await response.json()
+          
+          // DBから取得した設定をマージ
+          if (dbSettings && Object.keys(dbSettings).length > 0) {
+            const mergedSettings: DropdownSettings = { ...DEFAULT_SETTINGS }
+            
+            // 各カテゴリの設定をマージ
+            Object.keys(dbSettings).forEach(category => {
+              Object.keys(dbSettings[category]).forEach(key => {
+                if (key in mergedSettings) {
+                  mergedSettings[key as keyof DropdownSettings] = dbSettings[category][key]
+                } else {
+                  // 削除済みフィールド（nextActionSupplement, nextActionCompleted）は警告を出さない
+                  if (key !== 'nextActionSupplement' && key !== 'nextActionCompleted') {
+                    console.warn(`[Settings] Key "${key}" in category "${category}" not found in DropdownSettings type`)
+                  }
+                }
+              })
+            })
+            
+            // デバッグ: openingPeriodの読み込み確認
+            if (mergedSettings.openingPeriod && mergedSettings.openingPeriod.length > 0) {
+              console.log('[Settings] openingPeriod loaded:', mergedSettings.openingPeriod)
+            } else {
+              console.warn('[Settings] openingPeriod not loaded or empty. DB settings:', dbSettings)
+            }
+            
+            // デバッグ: 全設定の確認
+            console.log('[Settings] All settings keys:', Object.keys(mergedSettings))
+            console.log('[Settings] openingPeriod in settings:', 'openingPeriod' in mergedSettings, mergedSettings.openingPeriod)
+            
+            setSettings(mergedSettings)
+            setOriginalSettings(mergedSettings)
+            
+            // localStorageにも保存（フォールバック用）
+            localStorage.setItem('sfa-dropdown-settings', JSON.stringify(mergedSettings))
+            return
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load settings from DB:', error)
+      }
+      
+      // フォールバック: ローカルストレージから設定を読み込む
+      const saved = localStorage.getItem('sfa-dropdown-settings')
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          setSettings(parsed)
+          setOriginalSettings(parsed)
+        } catch (e) {
+          console.error('Failed to load settings:', e)
+          setSettings(DEFAULT_SETTINGS)
+          setOriginalSettings(DEFAULT_SETTINGS)
+        }
+      } else {
         setSettings(DEFAULT_SETTINGS)
         setOriginalSettings(DEFAULT_SETTINGS)
       }
-    } else {
-      setSettings(DEFAULT_SETTINGS)
-      setOriginalSettings(DEFAULT_SETTINGS)
     }
+    
+    loadSettings()
     
     // スプレッドシート設定を読み込む（現在編集中の設定）
     // 注意: 読み込み時は常に「未保存」「未取得」状態として扱う
@@ -382,7 +455,97 @@ export default function SettingsPage() {
     }
     
     loadSavedConfigsFromDB()
-  }, [])
+    
+    // カスタムマッピングフィールドを取得
+    const loadCustomFields = async () => {
+      setIsLoadingCustomFields(true)
+      try {
+        const response = await fetch('/api/custom-mapping-fields')
+        if (response.ok) {
+          const { fields } = await response.json()
+          setCustomFields(fields || [])
+        }
+      } catch (error) {
+        console.error('Failed to load custom fields:', error)
+      } finally {
+        setIsLoadingCustomFields(false)
+      }
+    }
+    loadCustomFields()
+    
+    // ユーザー権限を取得
+    const loadUserRole = async () => {
+      // 開発環境では、セッションがなくても実行
+      const userEmail = session?.user?.email || (isDevelopment ? 'tmatsukuma@redish.jp' : null)
+      
+      if (userEmail || isDevelopment) {
+        try {
+          // API経由でユーザー情報を取得（認証情報を含む）
+          const response = await fetch('/api/users')
+          if (response.ok) {
+            const { users: usersData } = await response.json()
+            console.log('[loadUserRole] Fetched users:', usersData)
+            console.log('[loadUserRole] Looking for email:', userEmail)
+            
+            if (usersData && usersData.length > 0) {
+              // 現在のユーザー情報を取得（メールアドレスで検索）
+              // 開発環境では、メールアドレスが一致しない場合でも最初のユーザーを使用
+              let currentUser = usersData.find((u: any) => u.email === userEmail)
+              
+              // 開発環境でメールアドレスが一致しない場合、最初のユーザーを使用
+              if (!currentUser && isDevelopment && usersData.length > 0) {
+                currentUser = usersData[0]
+                console.log('[loadUserRole] Email not found, using first user in dev mode:', currentUser)
+              }
+              
+              if (currentUser?.role) {
+                console.log('[loadUserRole] Setting role to:', currentUser.role)
+                setUserRole(currentUser.role as 'admin' | 'manager' | 'staff')
+              } else {
+                console.log('[loadUserRole] No role found, defaulting to staff')
+                setUserRole('staff') // デフォルト
+              }
+            } else {
+              console.log('[loadUserRole] No users found')
+              setUserRole('staff') // デフォルト
+            }
+          } else {
+            // APIエラーの場合もデフォルトを設定
+            console.error('[loadUserRole] API error:', response.status, response.statusText)
+            setUserRole('staff')
+          }
+        } catch (error) {
+          console.error('[loadUserRole] Failed to load user role:', error)
+          setUserRole('staff') // デフォルト
+        }
+      }
+    }
+    // 開発環境では常に実行、本番環境では認証済みの場合のみ
+    if (sessionStatus === 'authenticated' || isDevelopment) {
+      loadUserRole()
+    }
+    
+    // ユーザー一覧を取得（adminのみ）
+    const loadUsers = async () => {
+      if (userRole === 'admin') {
+        setIsLoadingUsers(true)
+        try {
+          const response = await fetch('/api/users')
+          if (response.ok) {
+            const { users: usersData } = await response.json()
+            setUsers(usersData || [])
+          }
+        } catch (error) {
+          console.error('Failed to load users:', error)
+        } finally {
+          setIsLoadingUsers(false)
+        }
+      }
+    }
+    if (userRole === 'admin') {
+      loadUsers()
+    }
+  }, [session, sessionStatus, userRole])
 
   // 連携データサブタブが選択されたときにデータを取得（APIルート経由）
   useEffect(() => {
@@ -454,14 +617,56 @@ export default function SettingsPage() {
     setIsEditing(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!settings) return
+    
+    // localStorageに保存（即座に反映）
     localStorage.setItem('sfa-dropdown-settings', JSON.stringify(settings))
     setOriginalSettings(settings)
-    // 同じウィンドウ内の他のコンポーネントに通知
     window.dispatchEvent(new Event('storage'))
-    setIsEditing(false)
-    alert('設定を保存しました')
+    
+    // データベースにも保存
+    try {
+      // 各セクション（カテゴリ）ごとに保存
+      const savePromises = sections.map(async (section) => {
+        const categorySettings: Record<string, any[]> = {}
+        
+        section.fields.forEach(field => {
+          if ('key' in field && field.key && field.key in settings) {
+            categorySettings[field.key] = settings[field.key as keyof DropdownSettings]
+          }
+        })
+        
+        if (Object.keys(categorySettings).length > 0) {
+          const categoryMap: Record<string, string> = {
+            'call': 'call',
+            'dealManagement': 'deal',
+          }
+          
+          const response = await fetch('/api/dropdown-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              category: categoryMap[section.id] || section.id,
+              settings: categorySettings,
+            }),
+          })
+          
+          if (!response.ok) {
+            const error = await response.json()
+            throw new Error(error.error || '保存に失敗しました')
+          }
+        }
+      })
+      
+      await Promise.all(savePromises)
+      setIsEditing(false)
+      alert('設定を保存しました（データベースにも保存されました）')
+    } catch (error) {
+      console.error('Failed to save to database:', error)
+      setIsEditing(false)
+      alert('設定を保存しました（ローカルストレージのみ。データベースへの保存に失敗しました）')
+    }
   }
 
   const handleCancel = () => {
@@ -1081,8 +1286,6 @@ export default function SettingsPage() {
         { type: 'divider', label: 'アクション' },
         { key: 'actionOutsideCall', label: '架電外アクション' },
         { key: 'nextActionContent', label: 'ネクストアクション内容' },
-        { key: 'nextActionSupplement', label: 'ネクストアクション補足' },
-        { key: 'nextActionCompleted', label: '実施' },
       ],
     },
     {
@@ -1090,8 +1293,12 @@ export default function SettingsPage() {
       title: '商談管理',
       fields: [
         { key: 'dealStaffFS', label: '商談担当FS' },
+        { key: 'meetingStatus', label: '商談実施状況' },
         { key: 'dealResult', label: '商談結果' },
         { key: 'lostReasonFS', label: '失注理由（FS→IS）' },
+        { key: 'competitorStatus', label: '競合・自己対応状況' },
+        { key: 'bantInfo', label: 'BANT情報' },
+        { key: 'openingPeriod', label: '開業時期' },
         { type: 'divider', label: 'フェーズ・確度' },
         { key: 'dealPhase', label: '商談フェーズ' },
         { key: 'rankEstimate', label: '確度ヨミ' },
@@ -1101,6 +1308,11 @@ export default function SettingsPage() {
     {
       id: 'spreadsheet',
       title: 'シート連携',
+      fields: [],
+    },
+    {
+      id: 'users',
+      title: 'ユーザー権限',
       fields: [],
     },
   ]
@@ -1115,6 +1327,8 @@ export default function SettingsPage() {
             <p className="mt-1 text-sm text-gray-500">
               {activeSection === 'spreadsheet' 
                 ? 'アライアンス先スプレッドシートからのデータ取り込み設定'
+                : activeSection === 'users'
+                ? 'ユーザー権限を管理します（管理者のみ）'
                 : 'ドロップダウンの選択項目を管理します'
               }
             </p>
@@ -1131,19 +1345,6 @@ export default function SettingsPage() {
                     キャンセル
                   </button>
                   <button
-                    onClick={() => {
-                      setSettings(DEFAULT_SETTINGS)
-                      setOriginalSettings(DEFAULT_SETTINGS)
-                      localStorage.removeItem('sfa-dropdown-settings')
-                      window.dispatchEvent(new Event('storage'))
-                      setIsEditing(false)
-                      alert('設定をリセットしました')
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    リセット
-                  </button>
-                  <button
                     onClick={handleSave}
                     className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors"
                     style={{ backgroundColor: '#0083a0' }}
@@ -1152,27 +1353,13 @@ export default function SettingsPage() {
                   </button>
                 </>
               ) : (
-                <>
-                  <button
-                    onClick={() => {
-                      setSettings(DEFAULT_SETTINGS)
-                      setOriginalSettings(DEFAULT_SETTINGS)
-                      localStorage.removeItem('sfa-dropdown-settings')
-                      window.dispatchEvent(new Event('storage'))
-                      alert('設定をリセットしました')
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    リセット
-                  </button>
-                  <button
-                    onClick={handleEdit}
-                    className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors"
-                    style={{ backgroundColor: '#0083a0' }}
-                  >
-                    編集
-                  </button>
-                </>
+                <button
+                  onClick={handleEdit}
+                  className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors"
+                  style={{ backgroundColor: '#0083a0' }}
+                >
+                  編集
+                </button>
               )}
             </div>
           )}
@@ -1204,81 +1391,393 @@ export default function SettingsPage() {
         <div className="card">
           <div className="p-6">
             {/* ドロップダウン設定セクション */}
-            {sections.filter(s => s.id !== 'spreadsheet').map((section) => (
+            {sections.filter(s => s.id !== 'spreadsheet' && s.id !== 'users').map((section) => (
               <div key={section.id} className={activeSection === section.id ? '' : 'hidden'}>
-                <div className="space-y-6">
-                  {section.fields.map((field, fieldIndex) => (
-                    'type' in field && field.type === 'divider' ? (
-                      <div key={`divider-${fieldIndex}`} className="flex items-center gap-3 pt-6 pb-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {section.fields.map((field, fieldIndex) => {
+                    const fieldKey = 'type' in field && field.type === 'divider' 
+                      ? `divider-${section.id}-${fieldIndex}`
+                      : ('key' in field && field.key ? `${section.id}-${field.key}` : `${section.id}-field-${fieldIndex}`)
+                    
+                    return 'type' in field && field.type === 'divider' ? (
+                      <div key={fieldKey} className="col-span-1 md:col-span-2 flex items-center gap-3 pt-6 pb-2">
                         <div className="h-px flex-1 bg-gray-300"></div>
                         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{field.label}</span>
                         <div className="h-px flex-1 bg-gray-300"></div>
                       </div>
                     ) : (
-                    <div key={'key' in field ? field.key : fieldIndex} className="border border-gray-200 rounded-lg p-4">
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">{field.label}</h3>
-                      <div className="space-y-2">
-                        {(settings[field.key as keyof DropdownSettings] || []).map((option, index) => (
-                          <div key={index} className="flex items-center gap-2">
-                            {isEditing ? (
-                              <>
-                                <input
-                                  type="text"
-                                  value={option.value}
-                                  onChange={(e) => updateOption(
-                                    field.key as keyof DropdownSettings,
-                                    index,
-                                    { ...option, value: e.target.value }
-                                  )}
-                                  className="flex-1 input text-sm"
-                                  placeholder="値"
-                                />
-                                <input
-                                  type="text"
-                                  value={option.label}
-                                  onChange={(e) => updateOption(
-                                    field.key as keyof DropdownSettings,
-                                    index,
-                                    { ...option, label: e.target.value }
-                                  )}
-                                  className="flex-1 input text-sm"
-                                  placeholder="表示名"
-                                />
-                                <button
-                                  onClick={() => removeOption(field.key as keyof DropdownSettings, index)}
-                                  className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
-                                >
-                                  削除
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <div className="flex-1 px-3 py-2 text-sm bg-gray-50 rounded border border-gray-200 text-gray-700">
-                                  {option.value}
-                                </div>
-                                <div className="flex-1 px-3 py-2 text-sm bg-gray-50 rounded border border-gray-200 text-gray-700">
-                                  {option.label}
-                                </div>
-                                <div className="w-16"></div>
-                              </>
-                            )}
-                          </div>
-                        ))}
-                        {isEditing && (
-                          <button
-                            onClick={() => addOption(field.key as keyof DropdownSettings, { value: '', label: '' })}
-                            className="w-full px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-                          >
-                            + 項目を追加
-                          </button>
-                        )}
+                    <React.Fragment key={fieldKey}>
+                      <div className="border border-gray-200 rounded-lg p-4">
+                        <h3 className="text-sm font-semibold text-gray-900 mb-4">{field.label}</h3>
+                        <div className="space-y-2">
+                          {('key' in field && field.key && settings) ? ((settings[field.key as keyof DropdownSettings] || []).map((option, index) => (
+                            <div key={index} className="flex items-center gap-2">
+                              {isEditing ? (
+                                <>
+                                  <input
+                                    type="text"
+                                    value={option.label}
+                                    onChange={(e) => {
+                                      const newLabel = e.target.value
+                                      // 表示名を変更したら、値も同じ値に自動更新
+                                      updateOption(
+                                        field.key as keyof DropdownSettings,
+                                        index,
+                                        { value: newLabel, label: newLabel }
+                                      )
+                                    }}
+                                    className="flex-1 input text-sm"
+                                    placeholder="表示名"
+                                  />
+                                  <button
+                                    onClick={() => removeOption(field.key as keyof DropdownSettings, index)}
+                                    className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+                                  >
+                                    削除
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="flex-1 px-3 py-2 text-sm bg-gray-50 rounded border border-gray-200 text-gray-700">
+                                    {option.label}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          ))) : (
+                            <div className="text-sm text-gray-500">設定が読み込まれていません</div>
+                          )}
+                          {isEditing && 'key' in field && field.key && (
+                            <button
+                              onClick={() => {
+                                // 新しい項目を追加（値と表示名は同じ値で初期化）
+                                const newValue = ''
+                                addOption(field.key as keyof DropdownSettings, { value: newValue, label: newValue })
+                              }}
+                              className="w-full px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                            >
+                              + 項目を追加
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                      {/* リサイクル優先度の説明セクション */}
+                      {'key' in field && field.key === 'recyclePriority' && (
+                        <div className="col-span-1 md:col-span-2 border border-blue-200 rounded-lg p-4 bg-blue-50">
+                          <h4 className="text-sm font-semibold text-gray-900 mb-3">リサイクル優先度 判断基準</h4>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm border-collapse">
+                              <thead>
+                                <tr className="bg-blue-100">
+                                  <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">優先度</th>
+                                  <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">判断基準例</th>
+                                  <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">対応アクション</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">A</td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    <ul className="list-disc list-inside space-y-1">
+                                      <li>失注理由が「タイミング」</li>
+                                      <li>RDで解決できる明確な課題あり。</li>
+                                      <li>自己対応による失注</li>
+                                    </ul>
+                                  </td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    再度アプローチすることで、短期間（例：1ヶ月以内）での商談化が期待できる最優先リード。
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">B</td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    <ul className="list-disc list-inside space-y-1">
+                                      <li>サービスに興味あり</li>
+                                      <li>課題感は明確</li>
+                                      <li>失注理由が「予算」</li>
+                                    </ul>
+                                  </td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    関心は示しており、タイミングや追加情報提供によって商談化の可能性があるリード。定期的なフォローアップ対象。
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">C</td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    <ul className="list-disc list-inside space-y-1">
+                                      <li>課題認識は低いが課題あり</li>
+                                      <li>過去の接触で明確な反応は薄い</li>
+                                      <li>他の税理士決定だが不満がでる可能性</li>
+                                    </ul>
+                                  </td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    中長期的な関係構築が必要なリード。有益な情報提供を通じて関心度を高めるナーチャリング対象。
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">D</td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    <ul className="list-disc list-inside space-y-1">
+                                      <li>反応がほとんどない</li>
+                                      <li>失注理由が「機能不足」「競合決定」</li>
+                                    </ul>
+                                  </td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    アプローチの優先度は低いが、将来的に状況が変わる可能性もあるリード。低頻度での情報提供や、新機能リリースなどのタイミングで再アプローチを検討。
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">E</td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    <ul className="list-disc list-inside space-y-1">
+                                      <li>ターゲット条件から外れている（業種、規模など）</li>
+                                      <li>連絡先不明、コンタクト不可</li>
+                                      <li>明確なアプローチ拒否</li>
+                                    </ul>
+                                  </td>
+                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                    基本的にリサイクル対象外とするリード。CRM上は区別して管理。
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </React.Fragment>
                     )
-                  ))}
+                  })}
                 </div>
               </div>
             ))}
+            
+            {/* ユーザー権限設定セクション */}
+            <div className={activeSection === 'users' ? '' : 'hidden'}>
+              <div className="space-y-6">
+                {/* 現在のユーザー情報表示 */}
+                <div className="border border-gray-200 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-4">現在のユーザー情報</h3>
+                  {(session?.user || (isDevelopment && sessionStatus === 'unauthenticated')) ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-gray-900">
+                            {session?.user?.name || session?.user?.email || '開発ユーザー'}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {session?.user?.email || 'tmatsukuma@redish.jp'}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className={`px-3 py-1 text-xs font-medium rounded ${
+                            userRole === 'admin' ? 'bg-red-100 text-red-800' :
+                            userRole === 'manager' ? 'bg-blue-100 text-blue-800' :
+                            userRole === 'staff' ? 'bg-gray-100 text-gray-800' :
+                            'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {userRole === 'admin' ? '管理者' :
+                             userRole === 'manager' ? 'マネージャー' :
+                             userRole === 'staff' ? 'スタッフ' :
+                             '権限未設定'}
+                          </span>
+                        </div>
+                      </div>
+                      {userRole !== 'admin' ? (
+                        <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                          <p className="text-xs text-yellow-800">
+                            <strong>注意:</strong> カスタムフィールドの追加・編集には <strong>管理者</strong> 権限が必要です。
+                          </p>
+                          <p className="text-xs text-yellow-700 mt-2">
+                            現在の権限では「カスタムフィールドを追加」ボタンは表示されません。権限の変更が必要な場合は、管理者に依頼してください。
+                          </p>
+                          {isDevelopment && (
+                            <div className="mt-3 pt-3 border-t border-yellow-300">
+                              <p className="text-xs text-yellow-800 mb-2">
+                                <strong>開発環境:</strong> 開発ユーザーを管理者に設定できます
+                              </p>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('開発ユーザー（tmatsukuma@redish.jp）を管理者に設定しますか？')) {
+                                    return
+                                  }
+                                  try {
+                                    const email = session?.user?.email || 'tmatsukuma@redish.jp'
+                                    const response = await fetch('/api/users/setup-dev', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ email, role: 'admin' }),
+                                    })
+                                    const data = await response.json()
+                                    if (response.ok) {
+                                      alert(data.message || '管理者権限を設定しました。ページをリロードします。')
+                                      window.location.reload()
+                                    } else {
+                                      // エラーメッセージを詳細に表示
+                                      let errorMessage = data.error || '管理者権限の設定に失敗しました'
+                                      if (data.message) {
+                                        errorMessage += '\n\n' + data.message
+                                      }
+                                      if (data.instructions) {
+                                        errorMessage += '\n\n【設定手順】\n' + data.instructions
+                                      }
+                                      if (data.details) {
+                                        errorMessage += '\n\n【詳細】\n' + data.details
+                                      }
+                                      alert(errorMessage)
+                                    }
+                                  } catch (error) {
+                                    console.error('Failed to setup admin:', error)
+                                    alert('管理者権限の設定に失敗しました。\nSupabaseダッシュボードから手動で設定してください。')
+                                  }
+                                }}
+                                className="px-3 py-1.5 text-xs font-medium text-white bg-yellow-600 rounded hover:bg-yellow-700 transition-colors"
+                              >
+                                🔧 開発環境: 管理者権限を設定
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : userRole === 'admin' ? (
+                        <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                          <p className="text-xs text-green-800">
+                            ✓ カスタムフィールドの追加・編集が可能です。
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-xs text-blue-800">
+                            ✓ 通常の設定（マッピング設定など）が可能です。
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-gray-500">
+                      <p className="text-sm">ログイン情報を取得できませんでした</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* ユーザー一覧（adminのみ） */}
+                {userRole === 'admin' && (
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-semibold text-gray-900">ユーザー一覧</h3>
+                      <button
+                        onClick={() => {
+                          setNewUser({ email: '', full_name: '', role: 'staff', department: '' })
+                          setShowAddUserModal(true)
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors"
+                      >
+                        + ユーザーを追加
+                      </button>
+                    </div>
+                    {isLoadingUsers ? (
+                      <div className="text-center py-8 text-gray-500">読み込み中...</div>
+                    ) : users.length > 0 ? (
+                      <div className="space-y-2">
+                        {users.map((user) => (
+                          <div key={user.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900">{user.full_name || user.email}</div>
+                              <div className="text-xs text-gray-500 mt-1">{user.email}</div>
+                              {user.department && (
+                                <div className="text-xs text-gray-500 mt-1">部署: {user.department}</div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {editingUserId === user.id ? (
+                                <>
+                                  <select
+                                    value={editingUserRole}
+                                    onChange={(e) => setEditingUserRole(e.target.value as any)}
+                                    title={`${user.full_name || user.email}の権限を選択`}
+                                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    <option value="staff">スタッフ</option>
+                                    <option value="manager">マネージャー</option>
+                                    <option value="admin">管理者</option>
+                                  </select>
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const response = await fetch('/api/users', {
+                                          method: 'PUT',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ id: user.id, role: editingUserRole }),
+                                        })
+                                        if (response.ok) {
+                                          const { user: updatedUser } = await response.json()
+                                          setUsers(users.map(u => u.id === user.id ? updatedUser : u))
+                                          setEditingUserId(null)
+                                          
+                                          // 自分の権限を更新した場合は、userRoleも更新
+                                          if (user.id === session?.user?.email && session?.user) {
+                                            setUserRole(editingUserRole)
+                                          }
+                                          
+                                          alert('ユーザー権限を更新しました')
+                                          // ページをリロードして反映
+                                          window.location.reload()
+                                        } else {
+                                          const error = await response.json()
+                                          alert(error.error || 'ユーザー権限の更新に失敗しました')
+                                        }
+                                      } catch (error) {
+                                        console.error('Failed to update user role:', error)
+                                        alert('ユーザー権限の更新に失敗しました')
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors"
+                                  >
+                                    保存
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingUserId(null)
+                                      setEditingUserRole('staff')
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                                  >
+                                    キャンセル
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className={`px-3 py-1 text-xs font-medium rounded ${
+                                    user.role === 'admin' ? 'bg-red-100 text-red-800' :
+                                    user.role === 'manager' ? 'bg-blue-100 text-blue-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {user.role === 'admin' ? '管理者' :
+                                     user.role === 'manager' ? 'マネージャー' :
+                                     'スタッフ'}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      setEditingUserId(user.id)
+                                      setEditingUserRole(user.role || 'staff')
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 transition-colors"
+                                  >
+                                    編集
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <p className="text-sm">ユーザーが登録されていません</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
             
             {/* スプレッドシート連携セクション */}
             <div className={activeSection === 'spreadsheet' ? '' : 'hidden'}>
@@ -1579,7 +2078,14 @@ export default function SettingsPage() {
                               </div>
                               <select
                                 value={mapping.targetField}
-                                onChange={(e) => updateMapping(index, e.target.value)}
+                                onChange={(e) => {
+                                  if (e.target.value === '__add_custom__') {
+                                    setPendingMappingIndex(index)
+                                    setShowCustomFieldModal(true)
+                                  } else {
+                                    updateMapping(index, e.target.value)
+                                  }
+                                }}
                                 className={`input text-sm ${isMapped ? 'border-blue-300 bg-blue-50' : ''}`}
                                 aria-label={`${mapping.spreadsheetHeader}列のマッピング先`}
                               >
@@ -1597,6 +2103,23 @@ export default function SettingsPage() {
                                     </option>
                                   )
                                 })}
+                                {customFields.map((field) => {
+                                  const isUsedElsewhere = usedFields.has(field.field_key) && mapping.targetField !== field.field_key
+                                  return (
+                                    <option 
+                                      key={field.field_key} 
+                                      value={field.field_key}
+                                      disabled={isUsedElsewhere}
+                                    >
+                                      {field.field_label}（カスタム: {field.field_key}）{isUsedElsewhere ? ' [使用中]' : ''}
+                                    </option>
+                                  )
+                                })}
+                                {userRole === 'admin' && (
+                                  <option value="__add_custom__" className="text-blue-600 font-semibold">
+                                    + カスタムフィールドを追加
+                                  </option>
+                                )}
                               </select>
                             </div>
                           )
@@ -2188,6 +2711,134 @@ export default function SettingsPage() {
                     })}
                   </div>
                 )}
+                
+                {/* カスタムフィールド管理セクション */}
+                <div className="border border-gray-200 rounded-lg p-6 mt-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">カスタムマッピングフィールド</h2>
+                      <p className="text-xs text-gray-500 mt-1">
+                        マッピング先に追加できるカスタムフィールドを管理します
+                      </p>
+                    </div>
+                    {userRole === 'admin' && (
+                      <button
+                        onClick={() => {
+                          setNewCustomField({ field_key: '', field_label: '', field_type: 'text', description: '' })
+                          setShowCustomFieldModal(true)
+                        }}
+                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        + カスタムフィールドを追加
+                      </button>
+                    )}
+                  </div>
+                  
+                  {isLoadingCustomFields ? (
+                    <div className="text-center py-8 text-gray-500">読み込み中...</div>
+                  ) : customFields.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">フィールドキー</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">表示名</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">タイプ</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">説明</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">作成日</th>
+                            {userRole === 'admin' && (
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {customFields.map((field) => (
+                            <tr key={field.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm font-mono text-gray-900">{field.field_key}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900">{field.field_label}</td>
+                              <td className="px-4 py-3 text-sm text-gray-500">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                  field.field_type === 'text' ? 'bg-blue-100 text-blue-800' :
+                                  field.field_type === 'number' ? 'bg-green-100 text-green-800' :
+                                  field.field_type === 'date' ? 'bg-purple-100 text-purple-800' :
+                                  'bg-orange-100 text-orange-800'
+                                }`}>
+                                  {field.field_type === 'text' ? 'テキスト' :
+                                   field.field_type === 'number' ? '数値' :
+                                   field.field_type === 'date' ? '日付' :
+                                   '真偽値'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate" title={field.description || ''}>
+                                {field.description || '-'}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-500">
+                                {field.created_at ? new Date(field.created_at).toLocaleDateString('ja-JP') : '-'}
+                              </td>
+                              {userRole === 'admin' && (
+                                <td className="px-4 py-3 text-sm">
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setNewCustomField({
+                                          field_key: field.field_key,
+                                          field_label: field.field_label,
+                                          field_type: field.field_type,
+                                          description: field.description || '',
+                                        })
+                                        setEditingCustomFieldId(field.id)
+                                        setShowCustomFieldModal(true)
+                                      }}
+                                      className="px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 transition-colors"
+                                    >
+                                      編集
+                                    </button>
+                                    {userRole === 'admin' && (
+                                      <button
+                                        onClick={async () => {
+                                          if (!confirm(`「${field.field_label}」を削除しますか？\nこの操作は取り消せません。`)) {
+                                            return
+                                          }
+                                          try {
+                                            const response = await fetch(`/api/custom-mapping-fields?id=${field.id}`, {
+                                              method: 'DELETE',
+                                            })
+                                            if (response.ok) {
+                                              setCustomFields(customFields.filter(f => f.id !== field.id))
+                                              alert('カスタムフィールドを削除しました')
+                                            } else {
+                                              const error = await response.json()
+                                              alert(error.error || 'カスタムフィールドの削除に失敗しました')
+                                            }
+                                          } catch (error) {
+                                            console.error('Failed to delete custom field:', error)
+                                            alert('カスタムフィールドの削除に失敗しました')
+                                          }
+                                        }}
+                                        className="px-2 py-1 text-xs font-medium text-red-700 bg-red-50 rounded hover:bg-red-100 transition-colors"
+                                      >
+                                        削除
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <p className="text-sm">カスタムフィールドが登録されていません</p>
+                      {userRole === 'admin' && (
+                        <p className="text-xs mt-2 text-gray-400">
+                          「+ カスタムフィールドを追加」ボタンから追加できます
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
               )}
 
@@ -2207,6 +2858,7 @@ export default function SettingsPage() {
                   <select
                     value={recordsFilter}
                     onChange={(e) => setRecordsFilter(e.target.value)}
+                    title="リードソースでフィルタ"
                     className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="all">すべてのソース</option>
@@ -2325,12 +2977,15 @@ export default function SettingsPage() {
         <>
           {/* オーバーレイ */}
           <div 
-            className="fixed inset-0 bg-black bg-opacity-30 z-40 transition-opacity"
-            onClick={() => setViewingMappingConfig(null)}
+            className="fixed inset-0 bg-black bg-opacity-30 z-40 transition-opacity duration-300"
+            onClick={() => {
+              setViewingMappingConfig(null)
+              setEditingMappingInPanel(null)
+            }}
           />
           
           {/* サイドパネル */}
-          <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 flex flex-col transform transition-transform">
+          <div className="fixed right-0 top-0 h-full w-full max-w-4xl bg-white shadow-2xl z-50 flex flex-col animate-[slideInRight_0.3s_ease-out]">
             {/* パネルヘッダー */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200 shrink-0">
               <div>
@@ -2342,7 +2997,11 @@ export default function SettingsPage() {
                 </p>
               </div>
               <button
-                onClick={() => setViewingMappingConfig(null)}
+                onClick={() => {
+                  setViewingMappingConfig(null)
+                  setEditingMappingInPanel(null)
+                }}
+                title="閉じる"
                 className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded"
               >
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2371,56 +3030,92 @@ export default function SettingsPage() {
                   <div>
                     <span className="font-medium text-gray-600">マッピング済み列数:</span>{' '}
                     <span className="text-gray-900">
-                      {viewingMappingConfig.columnMappings.filter(m => m.targetField).length}列
+                      {(editingMappingInPanel || viewingMappingConfig).columnMappings.filter(m => m.targetField).length}列
                     </span>
                   </div>
                 </div>
                 
                 {/* マッピングテーブル（A列から順に表示） */}
                 {viewingMappingConfig.columnMappings.length > 0 ? (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                  <div className="border border-gray-200 rounded-lg overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100vh - 400px)' }}>
+                    <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 shrink-0">
                       <h3 className="text-sm font-semibold text-gray-900">カラムマッピング一覧（A列から順）</h3>
                     </div>
-                    <div className="overflow-x-auto">
+                    <div className="overflow-auto flex-1">
                       <table className="w-full">
-                        <thead className="bg-gray-50 sticky top-0">
+                        <thead className="bg-gray-50 sticky top-0 z-20">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 sticky left-0 bg-gray-50 z-10 border-r border-gray-200">列</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 sticky left-0 bg-gray-50 z-30 border-r border-gray-200 shadow-sm">列</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">スプレッドシートのヘッダー</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">サンプルデータ</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">マッピング先フィールド</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                          {viewingMappingConfig.columnMappings.map((mapping, index) => (
-                            <tr key={index} className={mapping.targetField ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-gray-100'}>
-                              <td className="px-4 py-3 text-sm font-mono bg-gray-100 text-center font-semibold sticky left-0 z-10 border-r border-gray-200">
-                                {mapping.spreadsheetColumn}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-700">
-                                {mapping.spreadsheetHeader || '（空）'}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-600 bg-gray-50 max-w-xs truncate" title={mapping.sampleData || ''}>
-                                {mapping.sampleData || '（データなし）'}
-                              </td>
-                              <td className="px-4 py-3 text-sm">
-                                {mapping.targetField ? (
-                                  <span className="inline-flex items-center px-2 py-1 rounded bg-blue-50 text-blue-700 text-xs">
-                                    {MAPPABLE_FIELDS.find(f => f.key === mapping.targetField)?.label || mapping.targetField}
-                                    {MAPPABLE_FIELDS.find(f => f.key === mapping.targetField)?.required && (
-                                      <span className="ml-1 text-red-500">*</span>
-                                    )}
-                                    <span className="ml-1 text-gray-500">
-                                      （{camelToSnake(mapping.targetField)}）
-                                    </span>
-                                  </span>
-                                ) : (
-                                  <span className="text-gray-400 text-xs">-- マッピングしない --</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                          {(editingMappingInPanel || viewingMappingConfig).columnMappings.map((mapping, index) => {
+                            const currentConfig = editingMappingInPanel || viewingMappingConfig
+                            const handleMappingChange = (newTargetField: string) => {
+                              if (!editingMappingInPanel) {
+                                // 編集モードに切り替え
+                                setEditingMappingInPanel({ ...viewingMappingConfig! })
+                              }
+                              const updatedMappings = [...(editingMappingInPanel || viewingMappingConfig).columnMappings]
+                              updatedMappings[index] = { ...updatedMappings[index], targetField: newTargetField }
+                              setEditingMappingInPanel({ ...currentConfig, columnMappings: updatedMappings })
+                            }
+                            
+                            return (
+                              <tr key={index} className={mapping.targetField ? 'bg-blue-50 hover:bg-blue-100 border-l-4 border-blue-500' : 'bg-gray-50 hover:bg-gray-100'}>
+                                <td className={`px-4 py-3 text-sm font-mono text-center font-semibold sticky left-0 z-20 border-r border-gray-200 shadow-sm ${mapping.targetField ? 'bg-blue-100' : 'bg-gray-100'}`}>
+                                  {mapping.spreadsheetColumn}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-700">
+                                  {mapping.spreadsheetHeader || '（空）'}
+                                </td>
+                                <td className={`px-4 py-3 text-sm max-w-xs truncate ${mapping.targetField ? 'bg-blue-50 text-gray-700' : 'bg-gray-50 text-gray-600'}`} title={mapping.sampleData || ''}>
+                                  {mapping.sampleData || '（データなし）'}
+                                </td>
+                                <td className="px-4 py-3 text-sm">
+                                  <div className="flex items-center gap-2">
+                                    <select
+                                      value={mapping.targetField || ''}
+                                    onChange={(e) => {
+                                      if (e.target.value === '__add_custom__') {
+                                        setPendingMappingIndex(index)
+                                        setShowCustomFieldModal(true)
+                                      } else {
+                                        handleMappingChange(e.target.value)
+                                      }
+                                    }}
+                                      title={`${mapping.spreadsheetColumn}列のマッピング先フィールドを選択`}
+                                      className={`flex-1 px-2 py-1.5 text-xs border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                                        mapping.targetField 
+                                          ? 'border-blue-300 bg-blue-50 text-blue-900' 
+                                          : 'border-gray-300 bg-white'
+                                      }`}
+                                    >
+                                      <option value="">-- マッピングしない --</option>
+                                      {MAPPABLE_FIELDS.map(field => (
+                                        <option key={field.key} value={field.key}>
+                                          {field.label}{field.required ? ' *' : ''} ({camelToSnake(field.key)})
+                                        </option>
+                                      ))}
+                                      {customFields.map(field => (
+                                        <option key={field.field_key} value={field.field_key}>
+                                          {field.field_label} (カスタム: {field.field_key})
+                                        </option>
+                                      ))}
+                                      {userRole === 'admin' && (
+                                        <option value="__add_custom__" className="text-blue-600 font-semibold">
+                                          + カスタムフィールドを追加
+                                        </option>
+                                      )}
+                                    </select>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2439,21 +3134,366 @@ export default function SettingsPage() {
             
             {/* パネルフッター */}
             <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 shrink-0 bg-gray-50">
+              {editingMappingInPanel && (
+                <button
+                  onClick={async () => {
+                    // 編集内容を保存
+                    const configToSave = editingMappingInPanel
+                    const updatedConfig: SavedSpreadsheetConfig = {
+                      ...configToSave,
+                      lastSavedAt: new Date().toISOString(),
+                    }
+                    
+                    // データベースに保存
+                    try {
+                      const response = await fetch('/api/spreadsheet/configs', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ config: updatedConfig }),
+                      })
+                      if (response.ok) {
+                        const { result } = await response.json()
+                        if (result?.id) {
+                          updatedConfig.id = result.id
+                        }
+                      }
+                    } catch (error) {
+                      console.error('Failed to save to DB:', error)
+                    }
+                    
+                    // ローカルストレージとstateを更新
+                    const updated = savedConfigs.map(c => 
+                      c.id === updatedConfig.id ? updatedConfig : c
+                    )
+                    setSavedConfigs(updated)
+                    localStorage.setItem('sfa-saved-spreadsheet-configs', JSON.stringify(updated))
+                    
+                    // 表示を更新
+                    setViewingMappingConfig(updatedConfig)
+                    setEditingMappingInPanel(null)
+                    
+                    alert('マッピング設定を保存しました')
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  保存
+                </button>
+              )}
+              {editingMappingInPanel && (
+                <button
+                  onClick={() => {
+                    setEditingMappingInPanel(null)
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  キャンセル
+                </button>
+              )}
+              {!editingMappingInPanel && (
+                <button
+                  onClick={() => {
+                    loadConfigForEdit(viewingMappingConfig)
+                    setViewingMappingConfig(null)
+                    setEditingMappingInPanel(null)
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                >
+                  詳細編集
+                </button>
+              )}
               <button
                 onClick={() => {
-                  loadConfigForEdit(viewingMappingConfig)
                   setViewingMappingConfig(null)
+                  setEditingMappingInPanel(null)
                 }}
-                className="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
-              >
-                編集する
-              </button>
-              <button
-                onClick={() => setViewingMappingConfig(null)}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 閉じる
               </button>
+            </div>
+          </div>
+        </>
+      )}
+      
+      {/* ユーザー追加モーダル */}
+      {showAddUserModal && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-30 z-50 transition-opacity duration-300"
+            onClick={() => setShowAddUserModal(false)}
+          />
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 transform transition-all">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">ユーザーを追加</h2>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    メールアドレス <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="user@example.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    氏名
+                  </label>
+                  <input
+                    type="text"
+                    value={newUser.full_name}
+                    onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="山田 太郎"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    部署
+                  </label>
+                  <input
+                    type="text"
+                    value={newUser.department}
+                    onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="営業部"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    権限 <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newUser.role}
+                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value as 'admin' | 'manager' | 'staff' })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    title="ユーザーの権限を選択"
+                  >
+                    <option value="staff">スタッフ</option>
+                    <option value="manager">マネージャー</option>
+                    <option value="admin">管理者</option>
+                  </select>
+                </div>
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-xs text-blue-800">
+                    <strong>情報:</strong> ユーザーを追加すると、自動的にSupabase Authenticationにもユーザーが作成されます。
+                  </p>
+                  <p className="text-xs text-blue-700 mt-2">
+                    パスワードは自動生成されます。ユーザーには初回ログイン時にパスワードリセットが必要です。
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowAddUserModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!newUser.email) {
+                      alert('メールアドレスは必須です')
+                      return
+                    }
+                    try {
+                      const response = await fetch('/api/users', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newUser),
+                      })
+                      const data = await response.json()
+                      if (response.ok) {
+                        alert('ユーザーを追加しました')
+                        setShowAddUserModal(false)
+                        setNewUser({ email: '', full_name: '', role: 'staff', department: '' })
+                        // ユーザー一覧を再読み込み
+                        const usersResponse = await fetch('/api/users')
+                        if (usersResponse.ok) {
+                          const { users: updatedUsers } = await usersResponse.json()
+                          setUsers(updatedUsers || [])
+                        }
+                      } else {
+                        alert(data.error || 'ユーザーの追加に失敗しました')
+                      }
+                    } catch (error) {
+                      console.error('Failed to add user:', error)
+                      alert('ユーザーの追加に失敗しました')
+                    }
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  追加
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* カスタムフィールド追加モーダル */}
+      {showCustomFieldModal && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-30 z-50 transition-opacity duration-300"
+            onClick={() => setShowCustomFieldModal(false)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto animate-[slideInRight_0.3s_ease-out]">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {editingCustomFieldId ? 'カスタムフィールドを編集' : 'カスタムフィールドを追加'}
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {editingCustomFieldId ? 'カスタムフィールドの情報を編集します' : '新しいマッピング先フィールドを作成します'}
+                </p>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    フィールドキー <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newCustomField.field_key}
+                    onChange={(e) => setNewCustomField({ ...newCustomField, field_key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
+                    placeholder="例: custom_field_1"
+                    disabled={!!editingCustomFieldId}
+                    className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      editingCustomFieldId ? 'bg-gray-100 cursor-not-allowed' : ''
+                    }`}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {editingCustomFieldId ? 'フィールドキーは変更できません' : '英数字とアンダースコアのみ使用可能'}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    表示名 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newCustomField.field_label}
+                    onChange={(e) => setNewCustomField({ ...newCustomField, field_label: e.target.value })}
+                    placeholder="例: カスタム項目1"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    フィールドタイプ <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newCustomField.field_type}
+                    onChange={(e) => setNewCustomField({ ...newCustomField, field_type: e.target.value as any })}
+                    title="カスタムフィールドのタイプを選択"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="text">テキスト</option>
+                    <option value="number">数値</option>
+                    <option value="date">日付</option>
+                    <option value="boolean">真偽値</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    説明（任意）
+                  </label>
+                  <textarea
+                    value={newCustomField.description}
+                    onChange={(e) => setNewCustomField({ ...newCustomField, description: e.target.value })}
+                    placeholder="このフィールドの説明を入力"
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+                <button
+                  onClick={() => {
+                    setShowCustomFieldModal(false)
+                    setNewCustomField({ field_key: '', field_label: '', field_type: 'text', description: '' })
+                    setEditingCustomFieldId(null)
+                    setPendingMappingIndex(null)
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!newCustomField.field_key || !newCustomField.field_label) {
+                      alert('フィールドキーと表示名は必須です')
+                      return
+                    }
+                    
+                    try {
+                      if (editingCustomFieldId) {
+                        // 更新
+                        const response = await fetch('/api/custom-mapping-fields', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ id: editingCustomFieldId, ...newCustomField }),
+                        })
+                        
+                        if (response.ok) {
+                          const { field } = await response.json()
+                          setCustomFields(customFields.map(f => f.id === editingCustomFieldId ? field : f))
+                          setShowCustomFieldModal(false)
+                          setNewCustomField({ field_key: '', field_label: '', field_type: 'text', description: '' })
+                          setEditingCustomFieldId(null)
+                          alert('カスタムフィールドを更新しました')
+                        } else {
+                          const error = await response.json()
+                          alert(error.error || 'カスタムフィールドの更新に失敗しました')
+                        }
+                      } else {
+                        // 新規作成
+                        const response = await fetch('/api/custom-mapping-fields', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(newCustomField),
+                        })
+                        
+                        if (response.ok) {
+                          const { field } = await response.json()
+                          setCustomFields([...customFields, field])
+                          setShowCustomFieldModal(false)
+                          setNewCustomField({ field_key: '', field_label: '', field_type: 'text', description: '' })
+                          
+                          // カスタムフィールド追加後に自動的にマッピング
+                          if (pendingMappingIndex !== null) {
+                            if (editingMappingInPanel) {
+                              // サイドパネル内の編集
+                              const updatedMappings = [...(editingMappingInPanel || viewingMappingConfig).columnMappings]
+                              updatedMappings[pendingMappingIndex] = { ...updatedMappings[pendingMappingIndex], targetField: field.field_key }
+                              setEditingMappingInPanel({ ...(editingMappingInPanel || viewingMappingConfig)!, columnMappings: updatedMappings })
+                            } else {
+                              // 設定タブの編集
+                              updateMapping(pendingMappingIndex, field.field_key)
+                            }
+                            setPendingMappingIndex(null)
+                          }
+                          
+                          alert('カスタムフィールドを追加しました')
+                        } else {
+                          const error = await response.json()
+                          alert(error.error || 'カスタムフィールドの追加に失敗しました')
+                        }
+                      }
+                    } catch (error) {
+                      console.error('Failed to save custom field:', error)
+                      alert(editingCustomFieldId ? 'カスタムフィールドの更新に失敗しました' : 'カスタムフィールドの追加に失敗しました')
+                    }
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    {editingCustomFieldId ? '更新' : '追加'}
+                  </button>
+              </div>
             </div>
           </div>
         </>

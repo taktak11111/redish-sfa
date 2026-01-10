@@ -50,12 +50,14 @@ function toCamelCase(record: any) {
     phone: record.phone,
     email: record.email,
     address: record.address,
+    openingDateOriginal: record.opening_date_original,
     openingDate: record.opening_date,
     contactPreferredDateTime: record.contact_preferred_datetime,
     allianceRemarks: record.alliance_remarks,
-    omcAdditionalInfo1: record.omc_additional_info1,
-    omcSelfFunds: record.omc_self_funds,
-    omcPropertyStatus: record.omc_property_status,
+    omcAdditionalInfo1: record.omc_additional_info1, // 後方互換性
+    omcSelfFunds: record.omc_self_funds, // 後方互換性
+    omcPropertyStatus: record.omc_property_status, // 後方互換性
+    sourceSpecificData: record.source_specific_data || {}, // JSONB形式
     amazonTaxAccountant: record.amazon_tax_accountant,
     meetsmoreLink: record.meetsmore_link,
     meetsmoreEntityType: record.meetsmore_entity_type,
@@ -102,12 +104,19 @@ function toSnakeCase(data: any) {
   if (data.phone !== undefined) result.phone = data.phone
   if (data.email !== undefined) result.email = data.email
   if (data.address !== undefined) result.address = data.address
+  if (data.openingDateOriginal !== undefined) result.opening_date_original = data.openingDateOriginal
   if (data.openingDate !== undefined) result.opening_date = data.openingDate
   if (data.contactPreferredDateTime !== undefined) result.contact_preferred_datetime = data.contactPreferredDateTime
   if (data.allianceRemarks !== undefined) result.alliance_remarks = data.allianceRemarks
+  // 後方互換性: omc_*カラムも更新
+  // 後方互換性: omc_*カラムも更新
   if (data.omcAdditionalInfo1 !== undefined) result.omc_additional_info1 = data.omcAdditionalInfo1
   if (data.omcSelfFunds !== undefined) result.omc_self_funds = data.omcSelfFunds
   if (data.omcPropertyStatus !== undefined) result.omc_property_status = data.omcPropertyStatus
+  // JSONB形式のsource_specific_dataを更新
+  if (data.sourceSpecificData !== undefined) result.source_specific_data = data.sourceSpecificData
+  // JSONB形式のsource_specific_dataを更新
+  if (data.sourceSpecificData !== undefined) result.source_specific_data = data.sourceSpecificData
   if (data.amazonTaxAccountant !== undefined) result.amazon_tax_accountant = data.amazonTaxAccountant
   if (data.meetsmoreLink !== undefined) result.meetsmore_link = data.meetsmoreLink
   if (data.meetsmoreEntityType !== undefined) result.meetsmore_entity_type = data.meetsmoreEntityType
@@ -297,9 +306,10 @@ export async function PATCH(request: NextRequest) {
           opening_date: data.opening_date,
           contact_preferred_datetime: data.contact_preferred_datetime,
           alliance_remarks: data.alliance_remarks,
-          omc_additional_info1: data.omc_additional_info1,
-          omc_self_funds: data.omc_self_funds,
-          omc_property_status: data.omc_property_status,
+          omc_additional_info1: data.omc_additional_info1, // 後方互換性
+          omc_self_funds: data.omc_self_funds, // 後方互換性
+          omc_property_status: data.omc_property_status, // 後方互換性
+          source_specific_data: data.source_specific_data || {}, // JSONB形式
           amazon_tax_accountant: data.amazon_tax_accountant,
           meetsmore_link: data.meetsmore_link,
           conversation_memo: data.conversation_memo,

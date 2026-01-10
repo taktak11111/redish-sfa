@@ -108,12 +108,14 @@ export interface CallRecord {
   phone: string // 電話番号
   email?: string // メールアドレス
   address?: string // 住所／エリア
-  openingDate?: string // 開業時期
+  openingDateOriginal?: string // 開業時期（連携元・自由記述）
+  openingDate?: string // 開業時期（ヒアリング・選択式）
   contactPreferredDateTime?: string // 連絡希望日時
   allianceRemarks?: string // 連携元備考
-  omcAdditionalInfo1?: string // OMC追加情報①
-  omcSelfFunds?: string // ⓶自己資金
-  omcPropertyStatus?: string // ⓷物件状況
+  omcAdditionalInfo1?: string // OMC追加情報①（後方互換性のため残す）
+  omcSelfFunds?: string // ⓶自己資金（後方互換性のため残す）
+  omcPropertyStatus?: string // ⓷物件状況（後方互換性のため残す）
+  sourceSpecificData?: Record<string, any> // リードソース別情報（JSONB形式）
   amazonTaxAccountant?: string // Amazon税理士有無
   meetsmoreLink?: string // Meetsmoreリンク
   meetsmoreEntityType?: string // Meetsmore法人・個人
@@ -167,9 +169,10 @@ export interface Deal {
   openingDate?: string
   contactPreferredDateTime?: string
   allianceRemarks?: string
-  omcAdditionalInfo1?: string
-  omcSelfFunds?: string
-  omcPropertyStatus?: string
+  omcAdditionalInfo1?: string // 後方互換性のため残す
+  omcSelfFunds?: string // 後方互換性のため残す
+  omcPropertyStatus?: string // 後方互換性のため残す
+  sourceSpecificData?: Record<string, any> // リードソース別情報（JSONB形式）
   amazonTaxAccountant?: string
   meetsmoreLink?: string
   makuakeLink?: string

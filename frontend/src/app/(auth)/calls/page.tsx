@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CallRecord, CallStatus } from '@/types/sfa'
 import { CallDetailPanel } from '@/components/calls/CallDetailPanel'
+import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
 
 const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [
   { value: '未架電', label: '未架電', color: 'badge-gray' },
@@ -16,6 +17,7 @@ const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [
 export default function CallsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedRecord, setSelectedRecord] = useState<CallRecord | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
@@ -95,7 +97,16 @@ export default function CallsPage() {
       record.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       record.phone.includes(searchTerm) ||
       record.leadId.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesStatus && matchesSearch
+    
+    // 期間フィルタ
+    let matchesDateRange = true
+    if (dateRange && record.linkedDate) {
+      const recordDate = new Date(record.linkedDate)
+      recordDate.setHours(0, 0, 0, 0)
+      matchesDateRange = recordDate >= dateRange.start && recordDate <= dateRange.end
+    }
+    
+    return matchesStatus && matchesSearch && matchesDateRange
   })
 
   const handleRowClick = (record: CallRecord) => {
@@ -139,6 +150,12 @@ export default function CallsPage() {
         </div>
 
         <div className="card p-4 mb-4">
+          <div className="mb-4 flex justify-end">
+            <DateRangeFilter
+              defaultPreset="thisMonth"
+              onChange={setDateRange}
+            />
+          </div>
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
               <input

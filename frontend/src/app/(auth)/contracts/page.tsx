@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Deal } from '@/types/sfa'
 import { ContractDetailPanel } from '@/components/contracts/ContractDetailPanel'
+import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
 
 export default function ContractsPage() {
   const [searchTerm, setSearchTerm] = useState('')
+  const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedContract, setSelectedContract] = useState<Deal | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
@@ -88,7 +90,16 @@ export default function ContractsPage() {
       contract.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (contract.staffIS || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       dealId.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesSearch
+    
+    // 期間フィルタ（成約日を基準）
+    let matchesDateRange = true
+    if (dateRange && contract.resultDate) {
+      const recordDate = new Date(contract.resultDate)
+      recordDate.setHours(0, 0, 0, 0)
+      matchesDateRange = recordDate >= dateRange.start && recordDate <= dateRange.end
+    }
+    
+    return matchesSearch && matchesDateRange
   })
 
   const handleRowClick = (contract: Deal) => {
@@ -138,9 +149,25 @@ export default function ContractsPage() {
   return (
     <div className="relative">
       <div className="sticky top-0 z-10 bg-white pb-4 border-b border-gray-200 shadow-sm">
+        <div className="flex justify-between items-end mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">成約管理</h1>
+            <p className="mt-1 text-sm text-gray-500">成約した案件を管理します</p>
+          </div>
+          <DateRangeFilter
+            defaultPreset="thisMonth"
+            onChange={setDateRange}
+          />
+        </div>
+
         <div className="mb-4">
-          <h1 className="text-2xl font-bold text-gray-900">成約管理</h1>
-          <p className="mt-1 text-sm text-gray-500">成約した案件を管理します</p>
+          <input
+            type="text"
+            placeholder="会社名、氏名、担当、商談IDで検索..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="input"
+          />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -168,16 +195,6 @@ export default function ContractsPage() {
               )}
             </p>
           </div>
-        </div>
-
-        <div className="card p-4 mb-4">
-          <input
-            type="text"
-            placeholder="会社名、氏名、担当、商談IDで検索..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input"
-          />
         </div>
       </div>
 
