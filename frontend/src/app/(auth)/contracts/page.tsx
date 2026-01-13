@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Deal } from '@/types/sfa'
 import { ContractDetailPanel } from '@/components/contracts/ContractDetailPanel'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 
 type SortDirection = 'asc' | 'desc'
 type SortConfig = { key: string; direction: SortDirection } | null

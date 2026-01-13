@@ -7,7 +7,7 @@ import {
   ComposedChart, Line, FunnelChart, Funnel, LabelList, Cell
 } from 'recharts'
 import { format } from 'date-fns'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 
 interface CallProcessData {
   funnel: Array<{

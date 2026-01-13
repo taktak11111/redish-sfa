@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+
+# Lock files (use frontend's lock file)
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db

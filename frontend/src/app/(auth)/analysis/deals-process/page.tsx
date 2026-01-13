@@ -7,7 +7,7 @@ import {
   ComposedChart, Line, Cell
 } from 'recharts'
 import { format } from 'date-fns'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 
 interface DealProcessData {
   funnel: Array<{

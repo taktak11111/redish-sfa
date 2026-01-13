@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CallRecord, CallStatus } from '@/types/sfa'
 import { LeadDetailPanel } from '@/components/leads/LeadDetailPanel'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 
 const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [
   { value: '未架電', label: '未架電', color: 'badge-gray' },

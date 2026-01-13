@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CallRecord, CallStatus, CallList, CallListCondition } from '@/types/sfa'
 import { CallDetailPanel } from '@/components/calls/CallDetailPanel'
 import { CallListCreateModal } from '@/components/calls/CallListCreateModal'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 import { getDropdownOptions, refreshDropdownSettingsFromDB, type DropdownOption } from '@/lib/dropdownSettings'
 
 const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [

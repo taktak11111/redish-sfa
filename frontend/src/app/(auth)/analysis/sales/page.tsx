@@ -7,7 +7,7 @@ import {
   LineChart, Line, ComposedChart, AreaChart, Area, Cell, PieChart, Pie
 } from 'recharts'
 import { format } from 'date-fns'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 
 interface AnalysisData {
   summary: {

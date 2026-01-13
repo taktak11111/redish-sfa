@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Deal, DealRank, DealResult } from '@/types/sfa'
 import { DealDetailPanel } from '@/components/deals/DealDetailPanel'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 
 const RANK_OPTIONS: { value: DealRank; label: string; color: string }[] = [
   { value: 'A:80%', label: 'A:80%', color: 'badge-success' },

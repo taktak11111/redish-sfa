@@ -1,0 +1,21 @@
+{
+  "name": "@redish/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "REDISHシステム共通UIコンポーネントライブラリ",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.14",
+    "@types/react-dom": "^18.3.3",
+    "typescript": "^5.7.2"
+  }
+}

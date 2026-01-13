@@ -7,7 +7,7 @@ import {
   ComposedChart, Line
 } from 'recharts'
 import { format } from 'date-fns'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 
 interface CallAnalysisData {
   summary: {

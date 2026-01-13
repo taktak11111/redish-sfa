@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { CallListCondition, LeadSource } from '@/types/sfa'
-import { DateRangeFilter, DateRange } from 'redish_shared_components'
+import { DateRangeFilter, DateRange } from '@redish/shared'
 import { getDropdownOptions, refreshDropdownSettingsFromDB } from '@/lib/dropdownSettings'
 
 const LEAD_SOURCE_OPTIONS: { value: LeadSource; label: string }[] = [
