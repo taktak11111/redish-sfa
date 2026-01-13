@@ -7,7 +7,7 @@ import {
   ComposedChart, Line, FunnelChart, Funnel, LabelList, Cell
 } from 'recharts'
 import { format } from 'date-fns'
-import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
+import { DateRangeFilter, DateRange } from 'redish_shared_components'
 
 interface CallProcessData {
   funnel: Array<{
@@ -131,16 +131,16 @@ export default function CallProcessAnalysisPage() {
         <div className="card p-5 bg-white border-l-4 border-blue-500">
           <p className="text-sm font-medium text-gray-500">架電→アポ獲得率</p>
           <p className="text-2xl font-bold text-blue-600 mt-1">
-            {isLoading ? '---' : `${data?.processMetrics.avgCallsToAppointment > 0 ? (1 / data.processMetrics.avgCallsToAppointment * 100).toFixed(1) : 0}%`}
+            {isLoading ? '---' : data?.processMetrics?.avgCallsToAppointment && data.processMetrics.avgCallsToAppointment > 0 ? `${(1 / data.processMetrics.avgCallsToAppointment * 100).toFixed(1)}%` : '0%'}
           </p>
-          <p className="text-xs text-gray-400 mt-2">平均 {isLoading ? '---' : data?.processMetrics.avgCallsToAppointment.toFixed(1)} 架電で1アポ獲得</p>
+          <p className="text-xs text-gray-400 mt-2">平均 {isLoading ? '---' : data?.processMetrics?.avgCallsToAppointment ? data.processMetrics.avgCallsToAppointment.toFixed(1) : '---'} 架電で1アポ獲得</p>
         </div>
         <div className="card p-5 bg-white border-l-4 border-indigo-500">
           <p className="text-sm font-medium text-gray-500">アポ→商談設定率</p>
           <p className="text-2xl font-bold text-indigo-600 mt-1">
-            {isLoading ? '---' : `${data?.processMetrics.avgAppointmentToSetup > 0 ? (1 / data.processMetrics.avgAppointmentToSetup * 100).toFixed(1) : 0}%`}
+            {isLoading ? '---' : data?.processMetrics?.avgAppointmentToSetup && data.processMetrics.avgAppointmentToSetup > 0 ? `${(1 / data.processMetrics.avgAppointmentToSetup * 100).toFixed(1)}%` : '0%'}
           </p>
-          <p className="text-xs text-gray-400 mt-2">平均 {isLoading ? '---' : data?.processMetrics.avgAppointmentToSetup.toFixed(1)} アポで1商談設定</p>
+          <p className="text-xs text-gray-400 mt-2">平均 {isLoading ? '---' : data?.processMetrics?.avgAppointmentToSetup ? data.processMetrics.avgAppointmentToSetup.toFixed(1) : '---'} アポで1商談設定</p>
         </div>
         <div className="card p-5 bg-white border-l-4 border-green-500">
           <p className="text-sm font-medium text-gray-500">全体転換率</p>
@@ -234,7 +234,7 @@ export default function CallProcessAnalysisPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ステージ</th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">ステージ</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">転換率</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">成功率</th>
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">ボトルネック</th>

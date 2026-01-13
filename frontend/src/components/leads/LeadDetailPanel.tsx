@@ -15,7 +15,7 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
   const [formData, setFormData] = useState<Partial<CallRecord>>(record)
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     basic: true,
-    sourceSpecific: false, // リードソース別情報はデフォルト閉じ
+    sourceSpecific: true, // リードソース別情報はデフォルト開き
   })
   const [dropdownSettings, setDropdownSettings] = useState({
     openingPeriod: getDropdownOptions('openingPeriod'),
@@ -68,7 +68,7 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
       <div 
         className="fixed top-0 right-0 h-full bg-white shadow-2xl z-50 overflow-y-auto"
         style={{ 
-          width: 'min(600px, 50vw)',
+          width: 'min(720px, 60vw)',
           animation: 'slideInRight 0.3s ease-out',
         }}
       >
@@ -107,15 +107,20 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
               </svg>
             </button>
             {expandedSections.basic && (
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="label">リードID</label>
-                <input type="text" value={formData.leadId || ''} disabled className="input bg-gray-50" />
+            <div className="space-y-4">
+              {/* 2列表示: リードID | リードソース */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">リードID</label>
+                  <input type="text" value={formData.leadId || ''} disabled className="input bg-gray-50" />
+                </div>
+                <div>
+                  <label className="label">リードソース</label>
+                  <input type="text" value={formData.leadSource || ''} disabled className="input bg-gray-50" />
+                </div>
               </div>
-              <div>
-                <label className="label">リードソース</label>
-                <input type="text" value={formData.leadSource || ''} disabled className="input bg-gray-50" />
-              </div>
+
+              {/* 1列表示: 連携日 */}
               <div>
                 <label className="label">連携日</label>
                 <input 
@@ -125,60 +130,74 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
                   className="input"
                 />
               </div>
-              <div>
-                <label className="label">業種</label>
-                <input 
-                  type="text" 
-                  value={formData.industry || ''} 
-                  onChange={(e) => handleChange('industry', e.target.value)}
-                  className="input"
-                />
+
+              {/* 2列表示: 業種 | 会社名/店舗名 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">業種</label>
+                  <input 
+                    type="text" 
+                    value={formData.industry || ''} 
+                    onChange={(e) => handleChange('industry', e.target.value)}
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">会社名/店舗名</label>
+                  <input 
+                    type="text" 
+                    value={formData.companyName || ''} 
+                    onChange={(e) => handleChange('companyName', e.target.value)}
+                    className="input"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="label">会社名/店舗名</label>
-                <input 
-                  type="text" 
-                  value={formData.companyName || ''} 
-                  onChange={(e) => handleChange('companyName', e.target.value)}
-                  className="input"
-                />
+
+              {/* 2列表示: 氏名 | ふりがな */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">氏名</label>
+                  <input 
+                    type="text" 
+                    value={formData.contactName || ''} 
+                    onChange={(e) => handleChange('contactName', e.target.value)}
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">ふりがな</label>
+                  <input 
+                    type="text" 
+                    value={formData.contactNameKana || ''} 
+                    onChange={(e) => handleChange('contactNameKana', e.target.value)}
+                    className="input"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="label">氏名</label>
-                <input 
-                  type="text" 
-                  value={formData.contactName || ''} 
-                  onChange={(e) => handleChange('contactName', e.target.value)}
-                  className="input"
-                />
+
+              {/* 2列表示: 電話番号 | メールアドレス */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">電話番号</label>
+                  <input 
+                    type="tel" 
+                    value={formData.phone || ''} 
+                    onChange={(e) => handleChange('phone', e.target.value)}
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">メールアドレス</label>
+                  <input 
+                    type="email" 
+                    value={formData.email || ''} 
+                    onChange={(e) => handleChange('email', e.target.value)}
+                    className="input"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="label">ふりがな</label>
-                <input 
-                  type="text" 
-                  value={formData.contactNameKana || ''} 
-                  onChange={(e) => handleChange('contactNameKana', e.target.value)}
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="label">電話番号</label>
-                <input 
-                  type="tel" 
-                  value={formData.phone || ''} 
-                  onChange={(e) => handleChange('phone', e.target.value)}
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="label">メールアドレス</label>
-                <input 
-                  type="email" 
-                  value={formData.email || ''} 
-                  onChange={(e) => handleChange('email', e.target.value)}
-                  className="input"
-                />
-              </div>
+
+              {/* 1列表示: 住所／エリア */}
               <div>
                 <label className="label">住所／エリア</label>
                 <input 
@@ -188,6 +207,8 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
                   className="input"
                 />
               </div>
+
+              {/* 1列表示: 開業時期（連携元） */}
               <div>
                 <label className="label">開業時期（連携元）</label>
                 <input 
@@ -198,21 +219,8 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
                   placeholder="連携元からの入力なし"
                 />
               </div>
-              <div>
-                <label className="label">開業時期（ヒアリング）</label>
-                <select
-                  value={formData.openingDate || ''}
-                  onChange={(e) => handleChange('openingDate', e.target.value)}
-                  className="input"
-                >
-                  <option value="">選択してください</option>
-                  {dropdownSettings.openingPeriod.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+
+              {/* 1列表示: 連絡希望日時 */}
               <div>
                 <label className="label">連絡希望日時</label>
                 <input 
@@ -222,6 +230,8 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
                   className="input"
                 />
               </div>
+
+              {/* 1列表示: 連携元備考 */}
               <div>
                 <label className="label">連携元備考</label>
                 <textarea 

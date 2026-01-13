@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Deal, DealRank, DealResult } from '@/types/sfa'
 import { DealDetailPanel } from '@/components/deals/DealDetailPanel'
-import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
+import { DateRangeFilter, DateRange } from 'redish_shared_components'
 
 const RANK_OPTIONS: { value: DealRank; label: string; color: string }[] = [
   { value: 'A:80%', label: 'A:80%', color: 'badge-success' },
@@ -20,6 +20,60 @@ const RESULT_OPTIONS: { value: DealResult | ''; label: string }[] = [
   { value: '03.失注（リサイクル対象）', label: '失注（リサイクル）' },
 ]
 
+type SortDirection = 'asc' | 'desc'
+type SortConfig = { key: string; direction: SortDirection } | null
+
+function parseDateLike(value: string): Date | null {
+  const trimmed = value.trim()
+  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(trimmed)
+  if (!m) return null
+  const yyyy = Number(m[1])
+  const mm = Number(m[2])
+  const dd = Number(m[3])
+  const d = new Date(yyyy, mm - 1, dd)
+  if (Number.isNaN(d.getTime())) return null
+  return d
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a === null || a === undefined) return 1
+  if (b === null || b === undefined) return -1
+
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime()
+
+  const aStr = String(a)
+  const bStr = String(b)
+  return aStr.localeCompare(bStr, 'ja', { numeric: true, sensitivity: 'base' })
+}
+
+function SortIcons({ active }: { active?: SortDirection }) {
+  return (
+    <span className="ml-2 inline-flex flex-col items-center justify-center leading-none">
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        className={active === 'asc' ? 'text-gray-900' : 'text-gray-400'}
+      >
+        <path d="M7 14l5-5 5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        className={active === 'desc' ? 'text-gray-900' : 'text-gray-400'}
+      >
+        <path d="M7 10l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  )
+}
+
 export default function DealsPage() {
   const [filterRank, setFilterRank] = useState<string>('all')
   const [filterResult, setFilterResult] = useState<string>('all')
@@ -27,6 +81,8 @@ export default function DealsPage() {
   const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
+  const [isFilterCollapsed, setIsFilterCollapsed] = useState(false)
+  const [sortConfig, setSortConfig] = useState<SortConfig>(null)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
     id: 100,
     service: 120,
@@ -119,6 +175,45 @@ export default function DealsPage() {
     return matchesRank && matchesResult && matchesSearch && matchesDateRange
   })
 
+  const sortedDeals = useMemo(() => {
+    if (!sortConfig) return filteredDeals
+    const { key, direction } = sortConfig
+
+    const withIndex = filteredDeals.map((deal, idx) => ({ deal, idx }))
+    withIndex.sort((a, b) => {
+      const aDealId = (a.deal as any).dealId || a.deal.id || ''
+      const bDealId = (b.deal as any).dealId || b.deal.id || ''
+
+      const aValRaw =
+        key === 'id'
+          ? aDealId
+          : key === 'linkedDate'
+            ? (a.deal.linkedDate ? parseDateLike(String(a.deal.linkedDate)) : null)
+            : key === 'appointmentDate'
+              ? (a.deal.appointmentDate ? parseDateLike(String(a.deal.appointmentDate)) : null)
+              : key === 'dealSetupDate'
+                ? (a.deal.dealSetupDate ? parseDateLike(String(a.deal.dealSetupDate)) : null)
+                : (a.deal as any)[key]
+
+      const bValRaw =
+        key === 'id'
+          ? bDealId
+          : key === 'linkedDate'
+            ? (b.deal.linkedDate ? parseDateLike(String(b.deal.linkedDate)) : null)
+            : key === 'appointmentDate'
+              ? (b.deal.appointmentDate ? parseDateLike(String(b.deal.appointmentDate)) : null)
+              : key === 'dealSetupDate'
+                ? (b.deal.dealSetupDate ? parseDateLike(String(b.deal.dealSetupDate)) : null)
+                : (b.deal as any)[key]
+
+      const cmp = compareValues(aValRaw, bValRaw)
+      if (cmp !== 0) return direction === 'asc' ? cmp : -cmp
+      return a.idx - b.idx
+    })
+
+    return withIndex.map(x => x.deal)
+  }, [filteredDeals, sortConfig])
+
   const handleRowClick = (deal: Deal) => {
     setSelectedDeal(deal)
     setIsPanelOpen(true)
@@ -155,72 +250,99 @@ export default function DealsPage() {
   return (
     <div className="relative">
       <div className="sticky top-0 z-10 bg-white pb-4 border-b border-gray-200 shadow-sm">
-        <div className="mb-4">
-          <h1 className="text-2xl font-bold text-gray-900">商談管理</h1>
-          <p className="mt-1 text-sm text-gray-500">商談の進捗を管理します</p>
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">商談管理</h1>
+            <p className="mt-1 text-sm text-gray-500">商談の進捗を管理します</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsFilterCollapsed((prev) => !prev)}
+            className="px-4 py-2 text-sm font-medium text-primary-800 bg-primary-100 border border-primary-200 rounded-md hover:bg-primary-200 shadow-sm"
+            aria-label={isFilterCollapsed ? 'フィルターを開く' : 'フィルターを閉じる'}
+          >
+            {isFilterCollapsed ? 'Open' : 'Close'}
+          </button>
         </div>
 
-        <div className="card p-4 mb-4">
-          <div className="mb-4 flex justify-end">
-            <DateRangeFilter
-              defaultPreset="thisMonth"
-              onChange={setDateRange}
-            />
+        {!isFilterCollapsed && (
+          <div className="card p-4 mb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex justify-end lg:justify-start">
+                <DateRangeFilter
+                  defaultPreset="thisMonth"
+                  onChange={setDateRange}
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 lg:justify-end lg:items-center">
+                <div className="sm:w-[520px] lg:w-[520px]">
+                  <input
+                    type="text"
+                    placeholder="会社名、担当者名、営業担当、商談IDで検索..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="input w-full"
+                  />
+                </div>
+                <div className="sm:w-36 lg:w-36">
+                  <select
+                    value={filterRank}
+                    onChange={(e) => setFilterRank(e.target.value)}
+                    className="input w-full"
+                    aria-label="確度フィルター"
+                  >
+                    <option value="all">すべての確度</option>
+                    {RANK_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:w-48 lg:w-48">
+                  <select
+                    value={filterResult}
+                    onChange={(e) => setFilterResult(e.target.value)}
+                    className="input w-full"
+                    aria-label="結果フィルター"
+                  >
+                    <option value="all">すべての結果</option>
+                    <option value="active">進行中のみ</option>
+                    {RESULT_OPTIONS.filter(o => o.value).map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="会社名、担当者名、営業担当、商談IDで検索..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="input"
-              />
-            </div>
-            <div className="sm:w-36">
-              <select
-                value={filterRank}
-                onChange={(e) => setFilterRank(e.target.value)}
-                className="input"
-              >
-                <option value="all">すべての確度</option>
-                {RANK_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="sm:w-48">
-              <select
-                value={filterResult}
-                onChange={(e) => setFilterResult(e.target.value)}
-                className="input"
-              >
-                <option value="all">すべての結果</option>
-                <option value="active">進行中のみ</option>
-                {RESULT_OPTIONS.filter(o => o.value).map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
 
       <div className="mt-6">
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-240px)]">
             <table className="divide-y divide-gray-200" style={{ width: 'max-content', minWidth: '100%' }}>
-              <thead className="bg-gray-100">
+              <thead className="bg-gray-100 sticky top-0 z-20 shadow-sm">
                 <tr>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.id, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'id'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'id', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>商談ID</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>商談ID</span>
+                      <SortIcons active={sortConfig?.key === 'id' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('id', e)}
@@ -228,10 +350,20 @@ export default function DealsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.service, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'service'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'service', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>サービス</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>サービス</span>
+                      <SortIcons active={sortConfig?.key === 'service' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('service', e)}
@@ -239,10 +371,20 @@ export default function DealsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.leadSource, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'leadSource'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'leadSource', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>リードソース</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>リードソース</span>
+                      <SortIcons active={sortConfig?.key === 'leadSource' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('leadSource', e)}
@@ -250,10 +392,20 @@ export default function DealsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.linkedDate, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'linkedDate'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'linkedDate', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>連携日</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>連携日</span>
+                      <SortIcons active={sortConfig?.key === 'linkedDate' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('linkedDate', e)}
@@ -261,10 +413,20 @@ export default function DealsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.contactName, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'contactName'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'contactName', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>氏名</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>氏名</span>
+                      <SortIcons active={sortConfig?.key === 'contactName' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('contactName', e)}
@@ -272,10 +434,20 @@ export default function DealsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.staffIS, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'staffIS'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'staffIS', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>担当IS</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>担当IS</span>
+                      <SortIcons active={sortConfig?.key === 'staffIS' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('staffIS', e)}
@@ -283,10 +455,20 @@ export default function DealsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.appointmentDate, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'appointmentDate'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'appointmentDate', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>アポイント獲得日</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>アポイント獲得日</span>
+                      <SortIcons active={sortConfig?.key === 'appointmentDate' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('appointmentDate', e)}
@@ -294,10 +476,20 @@ export default function DealsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.dealSetupDate, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'dealSetupDate'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'dealSetupDate', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>商談設定日</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>商談設定日</span>
+                      <SortIcons active={sortConfig?.key === 'dealSetupDate' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('dealSetupDate', e)}
@@ -305,10 +497,20 @@ export default function DealsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.dealTime, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'dealTime'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'dealTime', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>商談時間</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>商談時間</span>
+                      <SortIcons active={sortConfig?.key === 'dealTime' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('dealTime', e)}
@@ -335,7 +537,7 @@ export default function DealsPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredDeals.map((deal, index) => {
+                  sortedDeals.map((deal, index) => {
                     const dealId = (deal as any).dealId || deal.id || ''
                     return (
                       <tr 

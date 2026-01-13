@@ -1,16 +1,72 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Deal } from '@/types/sfa'
 import { ContractDetailPanel } from '@/components/contracts/ContractDetailPanel'
-import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
+import { DateRangeFilter, DateRange } from 'redish_shared_components'
+
+type SortDirection = 'asc' | 'desc'
+type SortConfig = { key: string; direction: SortDirection } | null
+
+function parseDateLike(value: string): Date | null {
+  const trimmed = value.trim()
+  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(trimmed)
+  if (!m) return null
+  const yyyy = Number(m[1])
+  const mm = Number(m[2])
+  const dd = Number(m[3])
+  const d = new Date(yyyy, mm - 1, dd)
+  if (Number.isNaN(d.getTime())) return null
+  return d
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a === null || a === undefined) return 1
+  if (b === null || b === undefined) return -1
+
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime()
+
+  const aStr = String(a)
+  const bStr = String(b)
+  return aStr.localeCompare(bStr, 'ja', { numeric: true, sensitivity: 'base' })
+}
+
+function SortIcons({ active }: { active?: SortDirection }) {
+  return (
+    <span className="ml-2 inline-flex flex-col items-center justify-center leading-none">
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        className={active === 'asc' ? 'text-gray-900' : 'text-gray-400'}
+      >
+        <path d="M7 14l5-5 5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        className={active === 'desc' ? 'text-gray-900' : 'text-gray-400'}
+      >
+        <path d="M7 10l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  )
+}
 
 export default function ContractsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedContract, setSelectedContract] = useState<Deal | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
+  const [isFilterCollapsed, setIsFilterCollapsed] = useState(false)
+  const [sortConfig, setSortConfig] = useState<SortConfig>(null)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
     dealId: 100,
     service: 120,
@@ -102,6 +158,41 @@ export default function ContractsPage() {
     return matchesSearch && matchesDateRange
   })
 
+  const sortedContracts = useMemo(() => {
+    if (!sortConfig) return contracts
+    const { key, direction } = sortConfig
+
+    const withIndex = contracts.map((contract, idx) => ({ contract, idx }))
+    withIndex.sort((a, b) => {
+      const aDealId = (a.contract as any).dealId || a.contract.id || ''
+      const bDealId = (b.contract as any).dealId || b.contract.id || ''
+
+      const aValRaw =
+        key === 'dealId'
+          ? aDealId
+          : key === 'dealExecutionDate'
+            ? (a.contract.dealExecutionDate ? parseDateLike(String(a.contract.dealExecutionDate)) : null)
+            : key === 'resultDate'
+              ? (a.contract.resultDate ? parseDateLike(String(a.contract.resultDate)) : null)
+              : (a.contract as any)[key]
+
+      const bValRaw =
+        key === 'dealId'
+          ? bDealId
+          : key === 'dealExecutionDate'
+            ? (b.contract.dealExecutionDate ? parseDateLike(String(b.contract.dealExecutionDate)) : null)
+            : key === 'resultDate'
+              ? (b.contract.resultDate ? parseDateLike(String(b.contract.resultDate)) : null)
+              : (b.contract as any)[key]
+
+      const cmp = compareValues(aValRaw, bValRaw)
+      if (cmp !== 0) return direction === 'asc' ? cmp : -cmp
+      return a.idx - b.idx
+    })
+
+    return withIndex.map(x => x.contract)
+  }, [contracts, sortConfig])
+
   const handleRowClick = (contract: Deal) => {
     setSelectedContract(contract)
     setIsPanelOpen(true)
@@ -149,27 +240,47 @@ export default function ContractsPage() {
   return (
     <div className="relative">
       <div className="sticky top-0 z-10 bg-white pb-4 border-b border-gray-200 shadow-sm">
-        <div className="flex justify-between items-end mb-4">
+        <div className="mb-4 flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">成約管理</h1>
             <p className="mt-1 text-sm text-gray-500">成約した案件を管理します</p>
           </div>
-          <DateRangeFilter
-            defaultPreset="thisMonth"
-            onChange={setDateRange}
-          />
+          <button
+            type="button"
+            onClick={() => setIsFilterCollapsed((prev) => !prev)}
+            className="px-4 py-2 text-sm font-medium text-primary-800 bg-primary-100 border border-primary-200 rounded-md hover:bg-primary-200 shadow-sm"
+            aria-label={isFilterCollapsed ? 'フィルターを開く' : 'フィルターを閉じる'}
+          >
+            {isFilterCollapsed ? 'Open' : 'Close'}
+          </button>
         </div>
 
-        <div className="mb-4">
-          <input
-            type="text"
-            placeholder="会社名、氏名、担当、商談IDで検索..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input"
-          />
-        </div>
+        {!isFilterCollapsed && (
+          <div className="card p-4 mb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex justify-end lg:justify-start">
+                <DateRangeFilter
+                  defaultPreset="thisMonth"
+                  onChange={setDateRange}
+                />
+              </div>
 
+              <div className="flex flex-col sm:flex-row gap-3 lg:justify-end lg:items-center">
+                <div className="sm:w-[520px] lg:w-[520px]">
+                  <input
+                    type="text"
+                    placeholder="会社名、氏名、担当、商談IDで検索..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="input w-full"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 統計カード（フィルタ開閉の対象外） */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div className="card p-6">
             <p className="text-sm text-gray-500">総成約数</p>
@@ -200,15 +311,25 @@ export default function ContractsPage() {
 
       <div className="mt-6">
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-240px)]">
             <table className="divide-y divide-gray-200" style={{ width: 'max-content', minWidth: '100%' }}>
-              <thead className="bg-gray-100">
+              <thead className="bg-gray-100 sticky top-0 z-20 shadow-sm">
                 <tr>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.dealId, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'dealId'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'dealId', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>商談ID</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>商談ID</span>
+                      <SortIcons active={sortConfig?.key === 'dealId' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('dealId', e)}
@@ -216,10 +337,20 @@ export default function ContractsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.service, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'service'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'service', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>サービス</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>サービス</span>
+                      <SortIcons active={sortConfig?.key === 'service' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('service', e)}
@@ -227,10 +358,20 @@ export default function ContractsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.leadSource, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'leadSource'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'leadSource', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>リードソース</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>リードソース</span>
+                      <SortIcons active={sortConfig?.key === 'leadSource' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('leadSource', e)}
@@ -238,10 +379,20 @@ export default function ContractsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.companyName, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'companyName'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'companyName', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>会社名</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>会社名</span>
+                      <SortIcons active={sortConfig?.key === 'companyName' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('companyName', e)}
@@ -249,10 +400,20 @@ export default function ContractsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.contactName, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'contactName'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'contactName', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>氏名</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>氏名</span>
+                      <SortIcons active={sortConfig?.key === 'contactName' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('contactName', e)}
@@ -260,10 +421,20 @@ export default function ContractsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.staff, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'staff'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'staff', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>担当</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>担当</span>
+                      <SortIcons active={sortConfig?.key === 'staff' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('staff', e)}
@@ -271,10 +442,20 @@ export default function ContractsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400 cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.dealExecutionDate, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'dealExecutionDate'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'dealExecutionDate', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>商談実施日</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>商談実施日</span>
+                      <SortIcons active={sortConfig?.key === 'dealExecutionDate' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('dealExecutionDate', e)}
@@ -282,10 +463,20 @@ export default function ContractsPage() {
                     />
                   </th>
                   <th 
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none"
+                    className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none cursor-pointer hover:bg-gray-50"
                     style={{ width: columnWidths.resultDate, minWidth: 20 }}
+                    onClick={() => {
+                      setSortConfig(prev => {
+                        const isSame = prev?.key === 'resultDate'
+                        const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                        return { key: 'resultDate', direction: nextDirection }
+                      })
+                    }}
                   >
-                    <span>結果確定日</span>
+                    <span className="inline-flex items-center justify-center w-full">
+                      <span>結果確定日</span>
+                      <SortIcons active={sortConfig?.key === 'resultDate' ? sortConfig.direction : undefined} />
+                    </span>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                       onMouseDown={(e) => handleResizeStart('resultDate', e)}
@@ -312,7 +503,7 @@ export default function ContractsPage() {
                     </td>
                   </tr>
                 ) : (
-                  contracts.map((contract, index) => {
+                  sortedContracts.map((contract, index) => {
                     const dealId = (contract as any).dealId || contract.id || ''
                     return (
                       <tr 

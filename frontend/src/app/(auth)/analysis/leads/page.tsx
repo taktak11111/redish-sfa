@@ -7,7 +7,7 @@ import {
   ComposedChart, Line
 } from 'recharts'
 import { format } from 'date-fns'
-import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
+import { DateRangeFilter, DateRange } from 'redish_shared_components'
 
 interface LeadAnalysisData {
   summary: {
@@ -204,7 +204,7 @@ export default function LeadAnalysisPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">リードソース</th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">リードソース</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">連携数</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">商談数</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">成約数</th>
@@ -270,12 +270,12 @@ export default function LeadAnalysisPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50 sticky top-0">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase bg-gray-50">連携日</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase bg-gray-50">ソース</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase bg-gray-50">会社名</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase bg-gray-50">担当者</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase bg-gray-50">電話番号</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase bg-gray-50">状態</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-gray-50">連携日</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-gray-50">ソース</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-gray-50">会社名</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-gray-50">担当者</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-gray-50">電話番号</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-gray-50">状態</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">

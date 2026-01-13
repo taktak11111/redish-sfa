@@ -42,29 +42,15 @@ async function checkPermission(supabase: any, requiredRole: 'admin' | 'manager' 
     .single()
 
   if (userError || !userData) {
-    // ユーザーがusersテーブルに存在しない場合はstaffとして扱う
-    const userRole = 'staff'
-    
-    // 権限チェック
-    if (requiredRole === 'admin_only' && userRole !== 'admin') {
-      return NextResponse.json(
-        { error: '管理者権限が必要です' },
-        { status: 403 }
-      )
-    }
-
-    if (requiredRole === 'manager' && !['admin', 'manager'].includes(userRole)) {
-      return NextResponse.json(
-        { error: '管理者またはマネージャー権限が必要です' },
-        { status: 403 }
-      )
-    }
-    
-    return null
+    // ユーザーがusersテーブルに存在しない場合は権限エラー
+    return NextResponse.json(
+      { error: 'ユーザー情報が見つかりません' },
+      { status: 403 }
+    )
   }
 
-  const userRole = userData.role
-
+  const userRole = userData.role as 'admin' | 'manager' | 'staff'
+  
   // 権限チェック
   if (requiredRole === 'admin_only' && userRole !== 'admin') {
     return NextResponse.json(

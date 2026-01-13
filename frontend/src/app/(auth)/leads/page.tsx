@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CallRecord, CallStatus } from '@/types/sfa'
 import { LeadDetailPanel } from '@/components/leads/LeadDetailPanel'
-import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
+import { DateRangeFilter, DateRange } from 'redish_shared_components'
 
 const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [
   { value: '未架電', label: '未架電', color: 'badge-gray' },
@@ -25,6 +25,60 @@ const LEAD_SOURCE_OPTIONS = [
   { value: 'REDISH', label: 'REDISH' },
 ]
 
+type SortDirection = 'asc' | 'desc'
+type SortConfig = { key: string; direction: SortDirection } | null
+
+function parseDateLike(value: string): Date | null {
+  const trimmed = value.trim()
+  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(trimmed)
+  if (!m) return null
+  const yyyy = Number(m[1])
+  const mm = Number(m[2])
+  const dd = Number(m[3])
+  const d = new Date(yyyy, mm - 1, dd)
+  if (Number.isNaN(d.getTime())) return null
+  return d
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a === null || a === undefined) return 1
+  if (b === null || b === undefined) return -1
+
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime()
+
+  const aStr = String(a)
+  const bStr = String(b)
+  return aStr.localeCompare(bStr, 'ja', { numeric: true, sensitivity: 'base' })
+}
+
+function SortIcons({ active }: { active?: SortDirection }) {
+  return (
+    <span className="ml-2 inline-flex flex-col items-center justify-center leading-none">
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        className={active === 'asc' ? 'text-gray-900' : 'text-gray-400'}
+      >
+        <path d="M7 14l5-5 5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        className={active === 'desc' ? 'text-gray-900' : 'text-gray-400'}
+      >
+        <path d="M7 10l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  )
+}
+
 export default function LeadsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterSource, setFilterSource] = useState<string>('all')
@@ -32,7 +86,9 @@ export default function LeadsPage() {
   const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedRecord, setSelectedRecord] = useState<CallRecord | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
-  const [isSourceCardExpanded, setIsSourceCardExpanded] = useState(false)
+  const [isFilterCollapsed, setIsFilterCollapsed] = useState(false)
+  const [isSourceCardExpanded, setIsSourceCardExpanded] = useState(true) // デフォルトで開いた状態
+  const [sortConfig, setSortConfig] = useState<SortConfig>(null)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
     leadId: 100,
     linkedDate: 120,
@@ -128,6 +184,25 @@ export default function LeadsPage() {
     return matchesStatus && matchesSource && matchesSearch && matchesDateRange
   })
 
+  const sortedRecords = useMemo(() => {
+    if (!sortConfig) return filteredRecords
+    const { key, direction } = sortConfig
+
+    const withIndex = filteredRecords.map((record, idx) => ({ record, idx }))
+    withIndex.sort((a, b) => {
+      const aValRaw =
+        key === 'linkedDate' ? (a.record.linkedDate ? parseDateLike(a.record.linkedDate) : null) : (a.record as any)[key]
+      const bValRaw =
+        key === 'linkedDate' ? (b.record.linkedDate ? parseDateLike(b.record.linkedDate) : null) : (b.record as any)[key]
+
+      const cmp = compareValues(aValRaw, bValRaw)
+      if (cmp !== 0) return direction === 'asc' ? cmp : -cmp
+      return a.idx - b.idx
+    })
+
+    return withIndex.map(x => x.record)
+  }, [filteredRecords, sortConfig])
+
   // リードソース別の件数をカウント（フィルタ前の全データから、期間・ステータス・検索のみ適用）
   const sourceCountsData = useMemo(() => {
     const allRecords = data?.data as CallRecord[] || []
@@ -214,70 +289,86 @@ export default function LeadsPage() {
   return (
     <div className="relative">
       <div className="sticky top-0 z-10 bg-white pb-4 border-b border-gray-200 shadow-sm">
-        <div className="mb-4">
-          <h1 className="text-2xl font-bold text-gray-900">リード管理</h1>
-          <p className="mt-1 text-sm text-gray-500">アライアンス先から取り込んだリードを一元管理します</p>
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">リード管理</h1>
+            <p className="mt-1 text-sm text-gray-500">アライアンス先から取り込んだリードを一元管理します</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsFilterCollapsed((prev) => !prev)}
+            className="px-4 py-2 text-sm font-medium text-primary-800 bg-primary-100 border border-primary-200 rounded-md hover:bg-primary-200 shadow-sm"
+            aria-label={isFilterCollapsed ? 'フィルターを開く' : 'フィルターを閉じる'}
+          >
+            {isFilterCollapsed ? 'Open' : 'Close'}
+          </button>
         </div>
 
-        <div className="card p-4 mb-4">
-          <div className="mb-4 flex justify-end">
-            <DateRangeFilter
-              defaultPreset="thisMonth"
-              onChange={setDateRange}
-            />
-          </div>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="会社名、担当者名、電話番号、メール、リードIDで検索..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="input"
-              />
-            </div>
-            <div className="sm:w-48">
-              <select
-                value={filterSource}
-                onChange={(e) => setFilterSource(e.target.value)}
-                className="input"
-                aria-label="リードソースでフィルタ"
-              >
-                {LEAD_SOURCE_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="sm:w-48">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="input"
-                aria-label="ステータスでフィルタ"
-              >
-                <option value="all">すべてのステータス</option>
-                {STATUS_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
-            <span>全 {filteredRecords.length} 件</span>
-            {filterSource !== 'all' && (
-              <span className="badge badge-info">{filterSource}</span>
-            )}
-            {filterStatus !== 'all' && (
-              <span className="badge badge-gray">{STATUS_OPTIONS.find(s => s.value === filterStatus)?.label}</span>
-            )}
-          </div>
-        </div>
+        {!isFilterCollapsed && (
+          <div className="card p-4 mb-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex justify-end lg:justify-start">
+                  <DateRangeFilter
+                    defaultPreset="thisMonth"
+                    onChange={setDateRange}
+                  />
+                </div>
 
-        {/* リードソース別件数カード */}
+                <div className="flex flex-col sm:flex-row gap-3 lg:justify-end lg:items-center">
+                  <div className="sm:w-[520px] lg:w-[520px]">
+                    <input
+                      type="text"
+                      placeholder="会社名、担当者名、電話番号、メール、リードIDで検索..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="input w-full"
+                    />
+                  </div>
+                  <div className="sm:w-52 lg:w-52">
+                    <select
+                      value={filterSource}
+                      onChange={(e) => setFilterSource(e.target.value)}
+                      className="input w-full"
+                      aria-label="リードソースでフィルタ"
+                    >
+                      {LEAD_SOURCE_OPTIONS.map(option => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:w-52 lg:w-52">
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      className="input w-full"
+                      aria-label="ステータスでフィルタ"
+                    >
+                      <option value="all">すべてのステータス</option>
+                      {STATUS_OPTIONS.map(option => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
+                <span>全 {filteredRecords.length} 件</span>
+                {filterSource !== 'all' && (
+                  <span className="badge badge-info">{filterSource}</span>
+                )}
+                {filterStatus !== 'all' && (
+                  <span className="badge badge-gray">{STATUS_OPTIONS.find(s => s.value === filterStatus)?.label}</span>
+                )}
+              </div>
+          </div>
+        )}
+
+        {/* リードソース別件数カード（フィルタ開閉の対象外） */}
         <div className="card p-4 mb-4">
           <button
             type="button"
@@ -333,10 +424,10 @@ export default function LeadsPage() {
                     key={source}
                     type="button"
                     onClick={() => setFilterSource(filterSource === source ? 'all' : source)}
-                    className={`px-3 py-2 rounded-lg border-2 text-center transition-all shadow-sm hover:shadow ${
+                    className={`px-3 py-2 rounded-lg border-2 text-center transition-all ${
                       filterSource === source
-                        ? 'border-[#0083a0] bg-gradient-to-b from-[#e6f7fa] to-[#d0f0f5] shadow-md'
-                        : 'border-gray-200 bg-gradient-to-b from-white to-gray-50 hover:border-[#0083a0]/50'
+                        ? 'border-[#0083a0] bg-gradient-to-b from-[#e6f7fa] to-[#d0f0f5] shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
+                        : 'border-gray-200 bg-gradient-to-b from-white to-gray-50 hover:border-[#0083a0]/50 shadow-md hover:shadow-lg transform hover:-translate-y-0.5'
                     }`}
                   >
                     <div className={`flex items-baseline justify-center gap-0.5 ${filterSource === source ? 'text-[#0083a0]' : 'text-gray-900'}`}>
@@ -367,9 +458,9 @@ export default function LeadsPage() {
 
       <div className="mt-6">
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-240px)]">
             <table className="divide-y divide-gray-200" style={{ width: 'max-content', minWidth: '100%' }}>
-              <thead className="bg-gray-100">
+              <thead className="bg-gray-100 sticky top-0 z-20 shadow-sm">
                 <tr>
                   {[
                     { key: 'leadId', label: 'リードID' },
@@ -389,10 +480,20 @@ export default function LeadsPage() {
                   ].map((col, idx, arr) => (
                     <th
                       key={col.key}
-                      className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none ${idx < arr.length - 1 ? 'border-r border-gray-400' : ''}`}
+                      className={`px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none cursor-pointer hover:bg-gray-50 ${idx < arr.length - 1 ? 'border-r border-gray-400' : ''}`}
                       style={{ width: columnWidths[col.key], minWidth: 20 }}
+                      onClick={() => {
+                        setSortConfig(prev => {
+                          const isSame = prev?.key === col.key
+                          const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
+                          return { key: col.key, direction: nextDirection }
+                        })
+                      }}
                     >
-                      <span>{col.label}</span>
+                      <span className="inline-flex items-center justify-center w-full">
+                        <span>{col.label}</span>
+                        <SortIcons active={sortConfig?.key === col.key ? sortConfig.direction : undefined} />
+                      </span>
                       <div
                         className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
                         onMouseDown={(e) => handleResizeStart(col.key, e)}
@@ -420,7 +521,7 @@ export default function LeadsPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredRecords.map((record, index) => (
+                  sortedRecords.map((record, index) => (
                     <tr 
                       key={record.leadId || `lead-${index}`}
                       onClick={() => handleRowClick(record)}

@@ -86,6 +86,24 @@ function toCamelCase(record: any) {
     dealStaffFS: record.deal_staff_fs,
     dealResult: record.deal_result,
     lostReasonFS: record.lost_reason_fs,
+    customerType: record.customer_type,
+    disqualifyReason: record.disqualify_reason,
+    unreachableReason: record.unreachable_reason,
+    lostReasonPrimary: record.lost_reason_primary,
+    lostReasonCustomerSub: record.lost_reason_customer_sub,
+    lostReasonCompanySub: record.lost_reason_company_sub,
+    lostReasonCompetitorSub: record.lost_reason_competitor_sub,
+    lostReasonSelfSub: record.lost_reason_self_sub,
+    lostReasonOtherSub: record.lost_reason_other_sub,
+    lostReasonMemoTemplate: record.lost_reason_memo_template,
+    // 架電オペレーション状態（Phase 1/2）
+    todayCallStatus: record.today_call_status,
+    callStatusToday: record.call_status_today,
+    callingStartedAt: record.calling_started_at,
+    connectedAt: record.connected_at,
+    endedAt: record.ended_at,
+    callingStaffIS: record.calling_staff_is,
+    lastConnectedDurationSeconds: record.last_connected_duration_seconds,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
   }
@@ -145,10 +163,51 @@ function toSnakeCase(data: any) {
   if (data.dealStaffFS !== undefined) result.deal_staff_fs = data.dealStaffFS
   if (data.dealResult !== undefined) result.deal_result = data.dealResult
   if (data.lostReasonFS !== undefined) result.lost_reason_fs = data.lostReasonFS
+  if (data.customerType !== undefined) result.customer_type = data.customerType
+  if (data.disqualifyReason !== undefined) result.disqualify_reason = data.disqualifyReason
+  if (data.unreachableReason !== undefined) result.unreachable_reason = data.unreachableReason
+  if (data.lostReasonPrimary !== undefined) result.lost_reason_primary = data.lostReasonPrimary
+  if (data.lostReasonCustomerSub !== undefined) result.lost_reason_customer_sub = data.lostReasonCustomerSub
+  if (data.lostReasonCompanySub !== undefined) result.lost_reason_company_sub = data.lostReasonCompanySub
+  if (data.lostReasonCompetitorSub !== undefined) result.lost_reason_competitor_sub = data.lostReasonCompetitorSub
+  if (data.lostReasonSelfSub !== undefined) result.lost_reason_self_sub = data.lostReasonSelfSub
+  if (data.lostReasonOtherSub !== undefined) result.lost_reason_other_sub = data.lostReasonOtherSub
+  if (data.lostReasonMemoTemplate !== undefined) result.lost_reason_memo_template = data.lostReasonMemoTemplate
+  // 架電オペレーション状態（Phase 1/2）
+  if (data.todayCallStatus !== undefined) result.today_call_status = data.todayCallStatus
+  if (data.callStatusToday !== undefined) result.call_status_today = data.callStatusToday
+  if (data.callingStartedAt !== undefined) result.calling_started_at = data.callingStartedAt
+  if (data.connectedAt !== undefined) result.connected_at = data.connectedAt
+  if (data.endedAt !== undefined) result.ended_at = data.endedAt
+  if (data.callingStaffIS !== undefined) result.calling_staff_is = data.callingStaffIS
+  if (data.lastConnectedDurationSeconds !== undefined) result.last_connected_duration_seconds = data.lastConnectedDurationSeconds
   return result
 }
 
+// ページネーションで全件取得（Supabase 1000件上限対策）
+async function fetchAllRecords(supabase: SupabaseClient, baseQuery: any): Promise<any[]> {
+  const allRecords: any[] = []
+  const pageSize = 1000
+  let offset = 0
+  
+  while (true) {
+    const { data, error } = await baseQuery.range(offset, offset + pageSize - 1)
+    if (error) throw error
+    if (!data || data.length === 0) break
+    
+    allRecords.push(...data)
+    if (data.length < pageSize) break // 最後のページ
+    offset += pageSize
+  }
+  
+  return allRecords
+}
+
 // GET: 架電記録一覧を取得
+// パフォーマンス最適化: サーバーサイドフィルタリング対応
+// - leadIds: カンマ区切りのリードID（リスト表示モード用、最大500件）
+// - startDate, endDate: 期間フィルタ（分析モード用）
+// - staffIS: 担当者フィルタ
 export async function GET(request: NextRequest) {
   // 認証チェック
   const authResult = await requireAuth()
@@ -162,26 +221,44 @@ export async function GET(request: NextRequest) {
     
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get('status') as CallStatus | null
+    const leadIdsParam = searchParams.get('leadIds')
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
+    const staffIS = searchParams.get('staffIS')
 
     let query = supabase
       .from('call_records')
       .select('*')
       .order('created_at', { ascending: false })
 
+    // リスト表示モード: leadIdsで絞り込み（最優先、高速）
+    if (leadIdsParam) {
+      const leadIds = leadIdsParam.split(',').slice(0, 500) // 最大500件
+      query = query.in('lead_id', leadIds)
+      console.log(`[API/calls] Filtering by leadIds: ${leadIds.length} items`)
+    } else {
+      // 通常モード: 期間・担当者でフィルタ
+      if (startDate) {
+        query = query.gte('linked_date', startDate)
+        console.log(`[API/calls] Filtering by startDate: ${startDate}`)
+      }
+      if (endDate) {
+        query = query.lte('linked_date', endDate)
+        console.log(`[API/calls] Filtering by endDate: ${endDate}`)
+      }
+      if (staffIS) {
+        query = query.eq('staff_is', staffIS)
+        console.log(`[API/calls] Filtering by staffIS: ${staffIS}`)
+      }
+    }
+
     if (status) {
       query = query.eq('status', status)
     }
 
     console.log('[API/calls] Executing query...')
-    const { data, error } = await query
-
-    if (error) {
-      console.error('[API/calls] Supabase query error:', JSON.stringify(error, null, 2))
-      return NextResponse.json(
-        { error: 'データの取得に失敗しました', details: error.message, code: error.code },
-        { status: 500 }
-      )
-    }
+    // ページネーションで全件取得（1000件上限対策）
+    const data = await fetchAllRecords(supabase, query)
 
     console.log(`[API/calls] Successfully fetched ${data?.length || 0} records`)
     const records = (data || []).map(toCamelCase)

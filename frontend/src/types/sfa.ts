@@ -111,6 +111,8 @@ export interface CallRecord {
   openingDateOriginal?: string // 開業時期（連携元・自由記述）
   openingDate?: string // 開業時期（ヒアリング・選択式）
   contactPreferredDateTime?: string // 連絡希望日時
+  callbackPreferredDate?: string // 折返し希望日（互換・一部UIで使用）
+  callbackPreferredTime?: string // 折返し希望時間帯（互換・一部UIで使用）
   allianceRemarks?: string // 連携元備考
   omcAdditionalInfo1?: string // OMC追加情報①（後方互換性のため残す）
   omcSelfFunds?: string // ⓶自己資金（後方互換性のため残す）
@@ -143,6 +145,19 @@ export interface CallRecord {
   dealStaffFS?: string // 商談担当FS
   dealResult?: string // 商談結果
   lostReasonFS?: string // 失注理由（FS→IS）
+
+  // v2（架電詳細の設定連動用）
+  customerType?: string // 顧客区分（属性）
+  disqualifyReason?: string // 対象外（Disqualified）理由
+  unreachableReason?: string // 連絡不能（Unreachable）理由
+  lostReasonPrimary?: string // 失注主因
+  lostReasonCustomerSub?: string // 失注サブ理由（顧客要因）
+  lostReasonCompanySub?: string // 失注サブ理由（自社要因）
+  lostReasonCompetitorSub?: string // 失注サブ理由（競合要因）
+  lostReasonSelfSub?: string // 失注サブ理由（自己対応）
+  lostReasonOtherSub?: string // 失注サブ理由（その他）
+  lostReasonMemoTemplate?: string // 備忘テンプレ（選択値）
+
   appointmentStatus?: string
   appointmentDateOld?: Date // 旧形式（互換性のため）
   staff?: string
@@ -150,6 +165,65 @@ export interface CallRecord {
   linkedAt?: Date // 旧形式（互換性のため）
   lastCalledAt?: Date // 旧形式（互換性のため）
   callHistory?: CallHistory[] // 架電履歴配列
+  // 本日の架電状況管理（Phase 1追加）
+  todayCallStatus?: '未了' | '済' // 本日の架電状況
+  // 架電ステータス（本日）
+  // - 例: '未架電' / '通電' / '不通1' / '不通2' ...（複数回架電を想定）
+  callStatusToday?: string
+
+  // 架電アクション状態（Phase 2: DB保存）
+  callingStartedAt?: string // ISO文字列（TIMESTAMPTZ）
+  connectedAt?: string // ISO文字列（TIMESTAMPTZ）
+  endedAt?: string // ISO文字列（TIMESTAMPTZ）
+  callingStaffIS?: string // 架電中の担当者
+  lastConnectedDurationSeconds?: number // 直近通電時間（秒）
+}
+
+// 架電リスト作成条件
+export interface CallListCondition {
+  // 基本条件
+  newLeads?: boolean // 新規リード（未架電）- 自動的に本日の架電リストに追加（必須）
+  noConnectionLeads?: boolean // 不通リード
+  maxNoConnectionCallCount?: number // 不通リード抽出時の架電回数上限（例: 5）
+  callbackLeads?: boolean // 折返し（ISステータスが「コンタクト試行中（折り返し）」）
+  recallLeads?: boolean // 再架電対象リード
+  recycleLeads?: boolean // リサイクル対象リード
+  manualSelection?: boolean // 手動選択
+  maxCount?: number // リスト全体の件数上限
+  
+  // 追加条件
+  dateRange?: { start: Date; end: Date } // 連携日の範囲
+  leadSources?: LeadSource[] // リードソース
+  industries?: string[] // 業種
+  staffIS?: string[] // 担当IS
+  
+  // 手動選択（manualSelection=trueの場合）
+  selectedLeadIds?: string[] // 個別に選択したリードID配列
+  
+  // 重複防止設定
+  preventDuplication?: boolean // 重複防止を有効にするか
+  isShared?: boolean // 共有リストかどうか
+}
+
+// 架電リスト
+export interface CallList {
+  id: string // リストID
+  name: string // リスト名（例: "2026-01-10_新規リード"）
+  date: string // リスト作成日（YYYY-MM-DD）
+  conditions: CallListCondition // 作成条件
+  leadIds: string[] // リストに含まれるリードID配列
+  staffIS?: string // 担当IS（個人リストモードの場合）
+  isShared: boolean // 共有リストかどうか
+  createdAt: Date // 作成日時
+  updatedAt: Date // 更新日時
+}
+
+// 架電リスト割り当て（重複防止用）
+export interface CallListAssignment {
+  leadId: string // リードID
+  callListId: string // 架電リストID
+  staffIS: string // 担当IS
+  assignedAt: Date // 割り当て日時
 }
 
 // 商談

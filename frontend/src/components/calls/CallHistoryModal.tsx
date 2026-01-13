@@ -4,6 +4,14 @@ import { useState, useEffect } from 'react'
 import { CallHistory, CallHistoryStatus } from '@/types/sfa'
 import { getDropdownOptions } from '@/lib/dropdownSettings'
 
+function tryShowPicker(el: HTMLInputElement) {
+  try {
+    ;(el as any).showPicker?.()
+  } catch {
+    // NotAllowedError などは無視（ブラウザ/環境差）
+  }
+}
+
 const HISTORY_STATUS_OPTIONS: { value: CallHistoryStatus; label: string }[] = [
   { value: '不通', label: '不通' },
   { value: '通話できた', label: '通話できた' },
@@ -113,7 +121,7 @@ export function CallHistoryModal({ isOpen, history, onClose, onSave }: CallHisto
         <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
           <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
             <h2 className="text-xl font-bold text-gray-900">
-              {history ? '架電履歴を編集' : '架電履歴を追加'}
+              {history ? '架電履歴（２回目以降の架電記録）を編集' : '架電履歴（２回目以降の架電記録）を追加'}
             </h2>
             <button
               onClick={onClose}
@@ -132,6 +140,8 @@ export function CallHistoryModal({ isOpen, history, onClose, onSave }: CallHisto
                 type="date"
                 value={formData.callDate}
                 onChange={(e) => setFormData({ ...formData, callDate: e.target.value })}
+                onFocus={(e) => tryShowPicker(e.currentTarget)}
+                onClick={(e) => tryShowPicker(e.currentTarget)}
                 className="input"
                 required
               />
@@ -142,6 +152,8 @@ export function CallHistoryModal({ isOpen, history, onClose, onSave }: CallHisto
                 type="time"
                 value={formData.callTime}
                 onChange={(e) => setFormData({ ...formData, callTime: e.target.value })}
+                onFocus={(e) => tryShowPicker(e.currentTarget)}
+                onClick={(e) => tryShowPicker(e.currentTarget)}
                 className="input"
               />
             </div>

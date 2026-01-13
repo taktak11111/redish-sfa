@@ -193,17 +193,47 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    const { error } = await supabase
+    // どのcall_recordに紐づく履歴かを取得（削除後のcall_count再計算用）
+    const { data: deletedRow, error: deleteError } = await supabase
       .from('call_history')
       .delete()
       .eq('id', id)
+      .select('call_record_id')
+      .single()
 
-    if (error) {
-      console.error('[API/call-history] Supabase error:', error)
+    if (deleteError) {
+      console.error('[API/call-history] Supabase error:', deleteError)
       return NextResponse.json(
-        { error: '架電履歴の削除に失敗しました', details: error.message },
+        { error: '架電履歴の削除に失敗しました', details: deleteError.message },
         { status: 500 }
       )
+    }
+
+    // call_count / last_called_date を再計算して反映
+    if (deletedRow?.call_record_id) {
+      const callRecordId = deletedRow.call_record_id as string
+
+      const [{ count }, { data: latestRow }] = await Promise.all([
+        supabase
+          .from('call_history')
+          .select('*', { count: 'exact', head: true })
+          .eq('call_record_id', callRecordId),
+        supabase
+          .from('call_history')
+          .select('call_date')
+          .eq('call_record_id', callRecordId)
+          .order('call_date', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ])
+
+      await supabase
+        .from('call_records')
+        .update({
+          call_count: count || 0,
+          last_called_date: latestRow?.call_date ?? null,
+        })
+        .eq('id', callRecordId)
     }
 
     return NextResponse.json({ success: true })

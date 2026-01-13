@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
-import { DropdownSettings, DropdownOption, DEFAULT_SETTINGS } from '@/lib/dropdownSettings'
+import { DropdownSettings, DropdownOption, DEFAULT_SETTINGS, applyDropdownSettingsMigrations } from '@/lib/dropdownSettings'
 import { createClient } from '@/lib/supabase/client'
 
 // スプレッドシート連携設定の型
@@ -203,6 +203,8 @@ export default function SettingsPage() {
   const [showUnmappedColumns, setShowUnmappedColumns] = useState(false)
   const [expandedSheets, setExpandedSheets] = useState<Set<string>>(new Set())
   const [isEditing, setIsEditing] = useState(false)
+  const [draggedIndex, setDraggedIndex] = useState<{ field: keyof DropdownSettings; index: number } | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<{ field: keyof DropdownSettings; index: number } | null>(null)
   
   // NextAuthセッションを取得
   const { data: session, status: sessionStatus } = useSession()
@@ -271,6 +273,29 @@ export default function SettingsPage() {
   useEffect(() => {
     // データベースから設定を読み込む（フォールバック: localStorage）
     const loadSettings = async () => {
+      // 直近に設定を保存した直後は、DB側の古い設定で上書きされて「元に戻る」ことがある。
+      // 保存直後はlocalStorageをSSOTとして扱い、DB取得をスキップする。
+      try {
+        const updatedAtRaw = localStorage.getItem('sfa-dropdown-settings.updatedAt')
+        const updatedAt = updatedAtRaw ? Number(updatedAtRaw) : 0
+        if (Number.isFinite(updatedAt) && updatedAt > 0) {
+          const ageMs = Date.now() - updatedAt
+          if (ageMs >= 0 && ageMs < 10 * 60 * 1000) {
+            const saved = localStorage.getItem('sfa-dropdown-settings')
+            if (saved) {
+              const parsed = JSON.parse(saved)
+              const merged: DropdownSettings = { ...DEFAULT_SETTINGS, ...(parsed || {}) }
+              const migrated = applyDropdownSettingsMigrations(merged)
+              setSettings(migrated)
+              setOriginalSettings(migrated)
+              return
+            }
+          }
+        }
+      } catch {
+        // noop
+      }
+
       try {
         const response = await fetch('/api/dropdown-settings')
         if (response.ok) {
@@ -305,11 +330,12 @@ export default function SettingsPage() {
             console.log('[Settings] All settings keys:', Object.keys(mergedSettings))
             console.log('[Settings] openingPeriod in settings:', 'openingPeriod' in mergedSettings, mergedSettings.openingPeriod)
             
-            setSettings(mergedSettings)
-            setOriginalSettings(mergedSettings)
+            const migrated = applyDropdownSettingsMigrations(mergedSettings)
+            setSettings(migrated)
+            setOriginalSettings(migrated)
             
             // localStorageにも保存（フォールバック用）
-            localStorage.setItem('sfa-dropdown-settings', JSON.stringify(mergedSettings))
+            localStorage.setItem('sfa-dropdown-settings', JSON.stringify(migrated))
             return
           }
         }
@@ -322,16 +348,19 @@ export default function SettingsPage() {
       if (saved) {
         try {
           const parsed = JSON.parse(saved)
-          setSettings(parsed)
-          setOriginalSettings(parsed)
+          const merged: DropdownSettings = { ...DEFAULT_SETTINGS, ...(parsed || {}) }
+          const migrated = applyDropdownSettingsMigrations(merged)
+          setSettings(migrated)
+          setOriginalSettings(migrated)
         } catch (e) {
           console.error('Failed to load settings:', e)
           setSettings(DEFAULT_SETTINGS)
           setOriginalSettings(DEFAULT_SETTINGS)
         }
       } else {
-        setSettings(DEFAULT_SETTINGS)
-        setOriginalSettings(DEFAULT_SETTINGS)
+        const migrated = applyDropdownSettingsMigrations(DEFAULT_SETTINGS)
+        setSettings(migrated)
+        setOriginalSettings(migrated)
       }
     }
     
@@ -622,12 +651,15 @@ export default function SettingsPage() {
     
     // localStorageに保存（即座に反映）
     localStorage.setItem('sfa-dropdown-settings', JSON.stringify(settings))
+    localStorage.setItem('sfa-dropdown-settings.updatedAt', String(Date.now()))
     setOriginalSettings(settings)
     window.dispatchEvent(new Event('storage'))
     
     // データベースにも保存
     try {
       // 各セクション（カテゴリ）ごとに保存
+      const saveResults: { section: string; success: boolean; error?: string }[] = []
+      
       const savePromises = sections.map(async (section) => {
         const categorySettings: Record<string, any[]> = {}
         
@@ -643,23 +675,32 @@ export default function SettingsPage() {
             'dealManagement': 'deal',
           }
           
+          const category = categoryMap[section.id] || section.id
+          console.log(`[Settings] Saving ${section.id} (category: ${category}):`, Object.keys(categorySettings))
+          
           const response = await fetch('/api/dropdown-settings', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              category: categoryMap[section.id] || section.id,
+              category,
               settings: categorySettings,
             }),
           })
           
+          const result = await response.json()
+          console.log(`[Settings] Save result for ${section.id}:`, result)
+          
           if (!response.ok) {
-            const error = await response.json()
-            throw new Error(error.error || '保存に失敗しました')
+            saveResults.push({ section: section.id, success: false, error: result.error || '保存失敗' })
+            throw new Error(result.error || '保存に失敗しました')
           }
+          
+          saveResults.push({ section: section.id, success: true })
         }
       })
       
       await Promise.all(savePromises)
+      console.log('[Settings] All save results:', saveResults)
       setIsEditing(false)
       alert('設定を保存しました（データベースにも保存されました）')
     } catch (error) {
@@ -702,6 +743,19 @@ export default function SettingsPage() {
       return {
         ...prev,
         [field]: prev[field].map((item, i) => i === index ? option : item),
+      }
+    })
+  }
+
+  const moveOption = (field: keyof DropdownSettings, fromIndex: number, toIndex: number) => {
+    setSettings(prev => {
+      if (!prev) return prev
+      const options = [...prev[field]]
+      const [moved] = options.splice(fromIndex, 1)
+      options.splice(toIndex, 0, moved)
+      return {
+        ...prev,
+        [field]: options,
       }
     })
   }
@@ -1279,13 +1333,26 @@ export default function SettingsPage() {
       title: '架電管理',
       fields: [
         { key: 'staffIS', label: '担当IS' },
-        { key: 'statusIS', label: 'ISステータス' },
-        { key: 'cannotContactReason', label: '対応不可/失注理由' },
-        { key: 'recyclePriority', label: 'リサイクル優先度' },
-        { key: 'resultContactStatus', label: '結果/コンタクト状況' },
+        { type: 'divider', label: 'ステータス（混在防止）' },
+        { key: 'statusIS', label: 'リードステータス' },
+        { key: 'customerType', label: '顧客区分（属性）' },
+        { key: 'resultContactStatus', label: '直近架電結果（未架電/不通/通電）' },
+        { key: 'cannotContactReason', label: '対象外/連絡不能 理由（現行フィールド）' },
+        { key: 'disqualifyReason', label: '対象外（Disqualified）理由（v2）' },
+        { key: 'unreachableReason', label: '連絡不能（Unreachable）理由（v2）' },
+        { type: 'divider', label: '失注理由（架電）' },
+        { key: 'lostReasonPrimary', label: '失注主因（顧客要因/自社要因/競合要因/自己対応/その他）' },
+        { key: 'lostReasonCustomerSub', label: '失注サブ理由（顧客要因）' },
+        { key: 'lostReasonCompanySub', label: '失注サブ理由（自社要因）' },
+        { key: 'lostReasonCompetitorSub', label: '失注サブ理由（競合要因）' },
+        { key: 'lostReasonSelfSub', label: '失注サブ理由（自己対応）' },
+        { key: 'lostReasonOtherSub', label: '失注サブ理由（その他）' },
+        { key: 'lostReasonMemoTemplates', label: '（旧）備忘テンプレ（競合内訳は「失注サブ理由（競合要因）」へ統合）' },
+        { key: 'recyclePriority', label: 'ナーチャリング優先度（A〜E）' },
         { type: 'divider', label: 'アクション' },
         { key: 'actionOutsideCall', label: '架電外アクション' },
         { key: 'nextActionContent', label: 'ネクストアクション内容' },
+        { key: 'improvementCategory', label: '改善・学習カテゴリ' },
       ],
     },
     {
@@ -1410,41 +1477,105 @@ export default function SettingsPage() {
                       <div className="border border-gray-200 rounded-lg p-4">
                         <h3 className="text-sm font-semibold text-gray-900 mb-4">{field.label}</h3>
                         <div className="space-y-2">
-                          {('key' in field && field.key && settings) ? ((settings[field.key as keyof DropdownSettings] || []).map((option, index) => (
-                            <div key={index} className="flex items-center gap-2">
-                              {isEditing ? (
-                                <>
-                                  <input
-                                    type="text"
-                                    value={option.label}
-                                    onChange={(e) => {
-                                      const newLabel = e.target.value
-                                      // 表示名を変更したら、値も同じ値に自動更新
-                                      updateOption(
-                                        field.key as keyof DropdownSettings,
-                                        index,
-                                        { value: newLabel, label: newLabel }
-                                      )
-                                    }}
-                                    className="flex-1 input text-sm"
-                                    placeholder="表示名"
-                                  />
-                                  <button
-                                    onClick={() => removeOption(field.key as keyof DropdownSettings, index)}
-                                    className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
-                                  >
-                                    削除
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <div className="flex-1 px-3 py-2 text-sm bg-gray-50 rounded border border-gray-200 text-gray-700">
-                                    {option.label}
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          ))) : (
+                          {('key' in field && field.key && settings) ? ((settings[field.key as keyof DropdownSettings] || []).map((option, index) => {
+                            const settingFieldKey = field.key as keyof DropdownSettings
+                            const isDragging = draggedIndex?.field === settingFieldKey && draggedIndex?.index === index
+                            const isDragOver = dragOverIndex?.field === settingFieldKey && dragOverIndex?.index === index
+                            
+                            return (
+                              <div 
+                                key={index} 
+                                className={`flex items-center gap-2 ${
+                                  isDragging ? 'opacity-50' : ''
+                                } ${
+                                  isDragOver ? 'border-t-2 border-primary-500' : ''
+                                }`}
+                                draggable={isEditing}
+                                onDragStart={(e) => {
+                                  if (isEditing) {
+                                    setDraggedIndex({ field: settingFieldKey, index })
+                                    e.dataTransfer.effectAllowed = 'move'
+                                  }
+                                }}
+                                onDragOver={(e) => {
+                                  if (isEditing && draggedIndex && draggedIndex.field === settingFieldKey && draggedIndex.index !== index) {
+                                    e.preventDefault()
+                                    e.dataTransfer.dropEffect = 'move'
+                                    setDragOverIndex({ field: settingFieldKey, index })
+                                  }
+                                }}
+                                onDragLeave={() => {
+                                  if (dragOverIndex?.field === settingFieldKey && dragOverIndex?.index === index) {
+                                    setDragOverIndex(null)
+                                  }
+                                }}
+                                onDrop={(e) => {
+                                  e.preventDefault()
+                                  if (draggedIndex && draggedIndex.field === settingFieldKey && draggedIndex.index !== index) {
+                                    moveOption(settingFieldKey, draggedIndex.index, index)
+                                  }
+                                  setDraggedIndex(null)
+                                  setDragOverIndex(null)
+                                }}
+                                onDragEnd={() => {
+                                  setDraggedIndex(null)
+                                  setDragOverIndex(null)
+                                }}
+                              >
+                                {isEditing ? (
+                                  <>
+                                    <div 
+                                      className="cursor-move flex-shrink-0 flex items-center justify-center" 
+                                      title="ドラッグして並び順を変更"
+                                      style={{ width: '24px', height: '24px', minWidth: '24px', minHeight: '24px' }}
+                                    >
+                                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="9" cy="5" r="2" fill="#6b7280"></circle>
+                                        <circle cx="9" cy="12" r="2" fill="#6b7280"></circle>
+                                        <circle cx="9" cy="19" r="2" fill="#6b7280"></circle>
+                                        <circle cx="15" cy="5" r="2" fill="#6b7280"></circle>
+                                        <circle cx="15" cy="12" r="2" fill="#6b7280"></circle>
+                                        <circle cx="15" cy="19" r="2" fill="#6b7280"></circle>
+                                      </svg>
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={option.label}
+                                      onChange={(e) => {
+                                        const newLabel = e.target.value
+                                        // 表示名を変更したら、値も同じ値に自動更新
+                                        updateOption(
+                                          settingFieldKey,
+                                          index,
+                                          { value: newLabel, label: newLabel }
+                                        )
+                                      }}
+                                      className="flex-1 input text-sm"
+                                      placeholder="表示名"
+                                    />
+                                    <button
+                                      onClick={() => removeOption(settingFieldKey, index)}
+                                      className="px-3 py-2 text-red-600 hover:bg-red-50 rounded transition-colors flex items-center justify-center"
+                                      title="削除"
+                                    >
+                                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600">
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path d="m19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                                      </svg>
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="flex-1 px-3 py-2 text-sm bg-gray-50 rounded border border-gray-200 text-gray-700">
+                                      {option.label}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )
+                          })) : (
                             <div className="text-sm text-gray-500">設定が読み込まれていません</div>
                           )}
                           {isEditing && 'key' in field && field.key && (
@@ -1462,91 +1593,93 @@ export default function SettingsPage() {
                         </div>
                       </div>
                       {/* リサイクル優先度の説明セクション */}
-                      {'key' in field && field.key === 'recyclePriority' && (
-                        <div className="col-span-1 md:col-span-2 border border-blue-200 rounded-lg p-4 bg-blue-50">
-                          <h4 className="text-sm font-semibold text-gray-900 mb-3">リサイクル優先度 判断基準</h4>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm border-collapse">
-                              <thead>
-                                <tr className="bg-blue-100">
-                                  <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">優先度</th>
-                                  <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">判断基準例</th>
-                                  <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">対応アクション</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                <tr>
-                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">A</td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    <ul className="list-disc list-inside space-y-1">
-                                      <li>失注理由が「タイミング」</li>
-                                      <li>RDで解決できる明確な課題あり。</li>
-                                      <li>自己対応による失注</li>
-                                    </ul>
-                                  </td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    再度アプローチすることで、短期間（例：1ヶ月以内）での商談化が期待できる最優先リード。
-                                  </td>
-                                </tr>
-                                <tr>
-                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">B</td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    <ul className="list-disc list-inside space-y-1">
-                                      <li>サービスに興味あり</li>
-                                      <li>課題感は明確</li>
-                                      <li>失注理由が「予算」</li>
-                                    </ul>
-                                  </td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    関心は示しており、タイミングや追加情報提供によって商談化の可能性があるリード。定期的なフォローアップ対象。
-                                  </td>
-                                </tr>
-                                <tr>
-                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">C</td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    <ul className="list-disc list-inside space-y-1">
-                                      <li>課題認識は低いが課題あり</li>
-                                      <li>過去の接触で明確な反応は薄い</li>
-                                      <li>他の税理士決定だが不満がでる可能性</li>
-                                    </ul>
-                                  </td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    中長期的な関係構築が必要なリード。有益な情報提供を通じて関心度を高めるナーチャリング対象。
-                                  </td>
-                                </tr>
-                                <tr>
-                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">D</td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    <ul className="list-disc list-inside space-y-1">
-                                      <li>反応がほとんどない</li>
-                                      <li>失注理由が「機能不足」「競合決定」</li>
-                                    </ul>
-                                  </td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    アプローチの優先度は低いが、将来的に状況が変わる可能性もあるリード。低頻度での情報提供や、新機能リリースなどのタイミングで再アプローチを検討。
-                                  </td>
-                                </tr>
-                                <tr>
-                                  <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">E</td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    <ul className="list-disc list-inside space-y-1">
-                                      <li>ターゲット条件から外れている（業種、規模など）</li>
-                                      <li>連絡先不明、コンタクト不可</li>
-                                      <li>明確なアプローチ拒否</li>
-                                    </ul>
-                                  </td>
-                                  <td className="border border-blue-300 px-3 py-2 text-gray-700">
-                                    基本的にリサイクル対象外とするリード。CRM上は区別して管理。
-                                  </td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
                     </React.Fragment>
                     )
                   })}
+
+                  {/* リサイクル優先度の説明セクション（最下部へ移動） */}
+                  {section.id === 'call' && (
+                    <div className="col-span-1 md:col-span-2 border border-blue-200 rounded-lg p-4 bg-blue-50">
+                      <h4 className="text-sm font-semibold text-gray-900 mb-3">リサイクル優先度 判断基準</h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm border-collapse">
+                          <thead>
+                            <tr className="bg-blue-100">
+                              <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">優先度</th>
+                              <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">判断基準例</th>
+                              <th className="border border-blue-300 px-3 py-2 text-left font-semibold text-gray-900">対応アクション</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">A</td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                <ul className="list-disc list-inside space-y-1">
+                                  <li>失注理由が「タイミング」</li>
+                                  <li>RDで解決できる明確な課題あり。</li>
+                                  <li>自己対応による失注</li>
+                                </ul>
+                              </td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                再度アプローチすることで、短期間（例：1ヶ月以内）での商談化が期待できる最優先リード。
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">B</td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                <ul className="list-disc list-inside space-y-1">
+                                  <li>サービスに興味あり</li>
+                                  <li>課題感は明確</li>
+                                  <li>失注理由が「予算」</li>
+                                </ul>
+                              </td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                関心は示しており、タイミングや追加情報提供によって商談化の可能性があるリード。定期的なフォローアップ対象。
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">C</td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                <ul className="list-disc list-inside space-y-1">
+                                  <li>課題認識は低いが課題あり</li>
+                                  <li>過去の接触で明確な反応は薄い</li>
+                                  <li>他の税理士決定だが不満がでる可能性</li>
+                                </ul>
+                              </td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                中長期的な関係構築が必要なリード。有益な情報提供を通じて関心度を高めるナーチャリング対象。
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">D</td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                <ul className="list-disc list-inside space-y-1">
+                                  <li>反応がほとんどない</li>
+                                  <li>失注理由が「機能不足」「競合決定」</li>
+                                </ul>
+                              </td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                アプローチの優先度は低いが、将来的に状況が変わる可能性もあるリード。低頻度での情報提供や、新機能リリースなどのタイミングで再アプローチを検討。
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="border border-blue-300 px-3 py-2 font-medium text-gray-900">E</td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                <ul className="list-disc list-inside space-y-1">
+                                  <li>ターゲット条件から外れている（業種、規模など）</li>
+                                  <li>連絡先不明、コンタクト不可</li>
+                                  <li>明確なアプローチ拒否</li>
+                                </ul>
+                              </td>
+                              <td className="border border-blue-300 px-3 py-2 text-gray-700">
+                                基本的にリサイクル対象外とするリード。CRM上は区別して管理。
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -2676,10 +2809,10 @@ export default function SettingsPage() {
                                 <table className="min-w-full divide-y divide-gray-200">
                                   <thead className="bg-gray-50">
                                     <tr>
-                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">列</th>
-                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">ヘッダー名</th>
-                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">マッピング先</th>
-                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">サンプルデータ</th>
+                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">列</th>
+                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">ヘッダー名</th>
+                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">マッピング先</th>
+                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">サンプルデータ</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-200">
@@ -2741,13 +2874,13 @@ export default function SettingsPage() {
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50 sticky top-0">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">フィールドキー</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">表示名</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">タイプ</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">説明</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">作成日</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">フィールドキー</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">表示名</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">タイプ</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">説明</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">作成日</th>
                             {userRole === 'admin' && (
-                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
                             )}
                           </tr>
                         </thead>
@@ -2904,25 +3037,25 @@ export default function SettingsPage() {
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           リードID
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           ソース
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           会社名/店舗名
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           氏名
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           電話番号
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           連携日
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           ステータス
                         </th>
                       </tr>

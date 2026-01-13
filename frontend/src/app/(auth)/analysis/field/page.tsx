@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Deal, CallRecord, LostReason, DealRank } from '@/types/sfa'
-import { DateRangeFilter, DateRange } from '@/components/shared/DateRangeFilter'
+import { DateRangeFilter, DateRange } from 'redish_shared_components'
 
 export default function FieldAnalysisPage() {
   const [dateRange, setDateRange] = useState<DateRange | null>(null)
