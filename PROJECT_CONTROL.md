@@ -303,13 +303,15 @@ REDISH_SFA/
 
 | # | タスク | 優先度 | 状態 |
 |:-:|--------|:------:|:----:|
-| 1 | Vercel本番デプロイ | P0 | ⏳ |
+| 1 | Vercel本番デプロイ | P0 | ✅ |
 | 2 | 売上分析機能実装 | P0 | - |
 | 3 | 商談分析機能実装 | P0 | - |
 | 4 | 架電分析機能実装 | P0 | - |
 | 5 | フィールド分析機能実装 | P0 | - |
 | 6 | 統合テスト | P0 | - |
 | 7 | 本番動作確認 | P0 | - |
+| 8 | **Google OAuth設定（本番用）** | P1 | ⏳ |
+| 9 | **Vercel環境変数 ALLOWED_EMAIL_DOMAINS 設定** | P1 | ⏳ |
 
 ### 完了済み作業
 
@@ -317,6 +319,10 @@ REDISH_SFA/
 - ✅ Supabase DB連携
 - ✅ RLS anon削除（セキュリティ強化）
 - ✅ APIルート認証ガード
+- ✅ **Monorepo構造への移行**（2026-01-13）
+  - 共通コンポーネント（DateRangeFilter）を `packages/shared/` に配置
+  - npm workspaces設定
+  - Vercelデプロイ設定（vercel.json）
 
 ### 今後の予定（1/15以降）
 
@@ -363,9 +369,15 @@ REDISH_SFA/
 - [x] 全機能Validation完了（動作確認済み）
 
 ### 認証
-- [ ] NextAuth.js の認証フロー動作確認
-- [ ] Google OAuth の本番ドメイン登録
-- [ ] 許可ユーザーのみアクセス可能か確認
+- [x] NextAuth.js の認証フロー動作確認
+- [ ] **Google OAuth の本番リダイレクトURI追加**
+  - Google Cloud Console → APIとサービス → 認証情報 → OAuth 2.0 クライアントID
+  - 追加URI: `https://redish-sfa-git-main-redish-1bf9fdac.vercel.app/api/auth/callback/google`
+- [ ] **Vercel環境変数 ALLOWED_EMAIL_DOMAINS 設定**
+  - Vercel Dashboard → Settings → Environment Variables
+  - Key: `ALLOWED_EMAIL_DOMAINS`, Value: `redish.jp`
+  - 設定後、Redeployが必要
+- [ ] 許可ユーザー（@redish.jp）のみアクセス可能か確認
 
 ### データ
 - [ ] テストデータの削除/本番データの投入
