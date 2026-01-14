@@ -1360,6 +1360,7 @@ export default function SettingsPage() {
       title: '商談管理',
       fields: [
         { key: 'dealStaffFS', label: '商談担当FS' },
+        { key: 'contractStaff', label: '契約担当者（成約・契約管理）' },
         { key: 'meetingStatus', label: '商談実施状況' },
         { key: 'dealResult', label: '商談結果' },
         { key: 'lostReasonFS', label: '失注理由（FS→IS）' },

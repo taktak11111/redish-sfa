@@ -79,6 +79,7 @@ export type ServiceType =
   | 'RT:税務'
   | 'RA:補助金'
   | 'RB:融資（借り換え）'
+  | 'RC:集客（MEO）'
 
 // リード
 export interface Lead {

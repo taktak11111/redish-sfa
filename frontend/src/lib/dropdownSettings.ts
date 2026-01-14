@@ -22,6 +22,8 @@ export interface DropdownSettings {
   actionOutsideCall: DropdownOption[]
   nextActionContent: DropdownOption[]
   dealStaffFS: DropdownOption[]
+  // 契約担当者（契約管理画面で使用）
+  contractStaff: DropdownOption[]
   dealResult: DropdownOption[]
   lostReasonFS: DropdownOption[]
   competitorStatus: DropdownOption[]
@@ -160,6 +162,11 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: '資料送付', label: '資料送付' },
   ],
   dealStaffFS: [
+    { value: '担当者X', label: '担当者X' },
+    { value: '担当者Y', label: '担当者Y' },
+    { value: '担当者Z', label: '担当者Z' },
+  ],
+  contractStaff: [
     { value: '担当者X', label: '担当者X' },
     { value: '担当者Y', label: '担当者Y' },
     { value: '担当者Z', label: '担当者Z' },

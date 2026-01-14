@@ -27,7 +27,7 @@ const navigation: NavElement[] = [
   { name: 'リード管理', href: '/leads', icon: UserGroupIcon },
   { name: '架電管理', href: '/calls', icon: PhoneIcon },
   { name: '商談管理', href: '/deals', icon: BriefcaseIcon },
-  { name: '成約管理', href: '/contracts', icon: DocumentCheckIcon },
+  { name: '成約・契約管理', href: '/contracts', icon: DocumentCheckIcon },
   
   // 分析・改善
   { type: 'separator', label: '分析・改善' },
