@@ -126,11 +126,18 @@ body {
   .input {
     @apply w-full rounded-lg border border-gray-300 px-4 py-2 text-sm 
            focus:outline-none focus:ring-2 
-           disabled:opacity-50 disabled:bg-gray-100;
+           disabled:bg-gray-100;
   }
   .input:focus {
     --tw-ring-color: #00a4c5;
     border-color: #00a4c5;
+  }
+  
+  /* 無効状態の入力欄 - 文字色を維持（商談前情報エリア用） */
+  .input:disabled {
+    color: #111827; /* text-gray-900 equivalent */
+    opacity: 1;
+    -webkit-text-fill-color: #111827;
   }
 
   .label {

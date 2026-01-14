@@ -145,6 +145,7 @@ export interface CallRecord {
   dealStaffFS?: string // 商談担当FS
   dealResult?: string // 商談結果
   lostReasonFS?: string // 失注理由（FS→IS）
+  needTemperature?: string // ニーズ温度（IS判定）A/B/C
 
   // v2（架電詳細の設定連動用）
   customerType?: string // 顧客区分（属性）
@@ -256,6 +257,8 @@ export interface Deal {
   service: ServiceType
   category: Category
   staffIS?: string // 担当IS
+  statusIS?: string // ISステータス（商談前情報で参照）
+  statusUpdateDate?: string // ステータス更新日（商談前情報で参照）
   appointmentDate?: string // アポイント獲得日
   dealSetupDate?: string // 商談設定日
   dealTime?: string // 商談時間
@@ -272,8 +275,8 @@ export interface Deal {
   nextActionContent?: string // 次回アクション内容
   responseDeadline?: string // 回答期限
   actionCompleted?: string // 対応済
-  customerBANTInfo?: string // 顧客BANT情報
-  competitorInfo?: string // 競合・自己対応情報
+  customerBANTInfo?: string // 顧客BANT情報（後方互換）
+  competitorInfo?: string // 競合・自己対応情報（後方互換）
   dealMemo?: string // 商談メモ
   rank: DealRank
   detailRank?: string
@@ -289,6 +292,88 @@ export interface Deal {
   contractDate?: Date
   setupDate?: Date
   createdAt: Date
+  
+  // === 新規フィールド（v2） ===
+  
+  // 商談実施状況
+  dealExecutionStatus?: string // 未実施/実施済み/ノーショー/連絡なし/キャンセル/リスケ
+  
+  // BANT情報
+  bantBudget?: string // B:予算
+  bantAuthority?: string // A:決裁権
+  bantNeed?: string // N:ニーズ
+  bantTimeline?: string // T:導入時期
+  bantMemo?: string // BANT補足メモ
+  
+  // 競合・自己対応状況
+  competitorStatus?: string // 競合状況
+  selfHandlingStatus?: string // 自己対応状況
+  competitorMemo?: string // 競合・自己対応メモ
+  
+  // 商談履歴（1回目）
+  dealPhase1?: string
+  phaseUpdateDate1?: string
+  rank1?: string // 後方互換用（UIでは非表示）
+  rankEstimate1?: string
+  dealMemo1?: string // 商談・確度メモ（1回目）
+  
+  // 商談履歴（2回目）
+  dealPhase2?: string
+  phaseUpdateDate2?: string
+  rank2?: string
+  rankEstimate2?: string
+  dealMemo2?: string // 商談メモ（2回目）
+  
+  // 商談履歴（3回目）
+  dealPhase3?: string
+  phaseUpdateDate3?: string
+  rank3?: string
+  rankEstimate3?: string
+  dealMemo3?: string // 商談メモ（3回目）
+  
+  // アクション管理
+  actionMemo?: string // アクションメモ
+  actionHistoryDate?: string // アクション履歴日
+  actionHistoryContent?: string // アクション履歴内容
+  actionHistoryMemo?: string // アクション履歴メモ
+  
+  // 商談最終結果
+  finalResult?: string // 成約/失注
+  resultMemo?: string // 結果メモ
+  
+  // 成約情報
+  contractReason?: string // 成約要因
+  contractMemo?: string // 成約メモ
+  
+  // 失注情報
+  lostMemo?: string // 失注メモ（旧：失注後アクション）
+  
+  // 改善・学習記録
+  learningRecord?: string
+  learningRecordDate?: string // 記録日
+  learningRecordTitle?: string // タイトル
+  learningRecordCategory?: string // カテゴリ
+  
+  // 商談開始/終了フラグ（テーブル用）
+  dealStarted?: boolean // 商談開始済み
+  dealEnded?: boolean // 商談終了済み
+  dealStartedAt?: string // 商談開始時刻（ISO形式）
+  dealDurationMinutes?: number // 商談時間（分）
+  
+  // ニーズ温度（商談後判定）
+  needTemperature?: string // A/B/C
+  
+  // 商談自己採点
+  selfQ1?: number // Q1: ゴール合意（0/1/2）
+  selfQ2?: number // Q2: 現状と課題の特定（0/1/2）
+  selfQ3?: number // Q3: 放置コストの具体化（0/1/2）
+  selfQ4?: number // Q4: 比較軸の提示（0/1/2）
+  selfQ5?: number // Q5: 不安解除（0/1/2）
+  selfQ6?: number // Q6: 次アクション確約（0/1/2）
+  selfQ7?: number // Q7: 商材別質問（0/1/2）
+  selfTotalScore?: number // 合計点（0-100）
+  improvementTheme?: string // 次回改善テーマ
+  reflectionMemo?: string // 振り返りメモ
 }
 
 // 成約（Deal型を拡張）

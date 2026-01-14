@@ -53,6 +53,8 @@ function toCamelCase(record: any) {
     service: record.service,
     category: record.category,
     staffIS: record.staff_is,
+    statusIS: record.status_is,
+    statusUpdateDate: record.status_update_date,
     appointmentDate: record.appointment_date,
     dealSetupDate: record.deal_setup_date,
     dealTime: record.deal_time,
@@ -83,6 +85,68 @@ function toCamelCase(record: any) {
     lostAfterAction: record.lost_after_action,
     feedbackToIS: record.feedback_to_is,
     feedback: record.feedback,
+    dealStarted: record.deal_started,
+    dealEnded: record.deal_ended,
+    dealStartedAt: record.deal_started_at,
+    dealDurationMinutes: record.deal_duration_minutes,
+    // 商談実施状況
+    dealExecutionStatus: record.deal_execution_status,
+    // BANT情報
+    bantBudget: record.bant_budget,
+    bantAuthority: record.bant_authority,
+    bantNeed: record.bant_need,
+    bantTimeline: record.bant_timeline,
+    bantMemo: record.bant_memo,
+    // 競合・自己対応状況
+    competitorStatus: record.competitor_status,
+    selfHandlingStatus: record.self_handling_status,
+    competitorMemo: record.competitor_memo,
+    // 商談履歴（1回目）
+    dealPhase1: record.deal_phase1,
+    phaseUpdateDate1: record.phase_update_date1,
+    rankEstimate1: record.rank_estimate1,
+    dealMemo1: record.deal_memo1,
+    // 商談履歴（2回目）
+    dealPhase2: record.deal_phase2,
+    phaseUpdateDate2: record.phase_update_date2,
+    rankEstimate2: record.rank_estimate2,
+    dealMemo2: record.deal_memo2,
+    // 商談履歴（3回目）
+    dealPhase3: record.deal_phase3,
+    phaseUpdateDate3: record.phase_update_date3,
+    rankEstimate3: record.rank_estimate3,
+    dealMemo3: record.deal_memo3,
+    // アクション管理
+    actionMemo: record.action_memo,
+    actionHistoryDate: record.action_history_date,
+    actionHistoryContent: record.action_history_content,
+    actionHistoryMemo: record.action_history_memo,
+    // 商談最終結果
+    finalResult: record.final_result,
+    resultMemo: record.result_memo,
+    // 成約情報
+    contractReason: record.contract_reason,
+    contractMemo: record.contract_memo,
+    // 失注情報
+    lostMemo: record.lost_memo,
+    // 改善・学習記録
+    learningRecord: record.learning_record,
+    learningRecordDate: record.learning_record_date,
+    learningRecordTitle: record.learning_record_title,
+    learningRecordCategory: record.learning_record_category,
+    // ニーズ温度
+    needTemperature: record.need_temperature,
+    // 商談自己採点
+    selfQ1: record.self_q1,
+    selfQ2: record.self_q2,
+    selfQ3: record.self_q3,
+    selfQ4: record.self_q4,
+    selfQ5: record.self_q5,
+    selfQ6: record.self_q6,
+    selfQ7: record.self_q7,
+    selfTotalScore: record.self_total_score,
+    improvementTheme: record.improvement_theme,
+    reflectionMemo: record.reflection_memo,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
   }
@@ -120,6 +184,8 @@ function toSnakeCase(data: any) {
   if (data.service !== undefined) result.service = data.service
   if (data.category !== undefined) result.category = data.category
   if (data.staffIS !== undefined) result.staff_is = data.staffIS
+  if (data.statusIS !== undefined) result.status_is = data.statusIS
+  if (data.statusUpdateDate !== undefined) result.status_update_date = data.statusUpdateDate
   if (data.appointmentDate !== undefined) result.appointment_date = data.appointmentDate
   if (data.dealSetupDate !== undefined) result.deal_setup_date = data.dealSetupDate
   if (data.dealTime !== undefined) result.deal_time = data.dealTime
@@ -150,6 +216,68 @@ function toSnakeCase(data: any) {
   if (data.lostAfterAction !== undefined) result.lost_after_action = data.lostAfterAction
   if (data.feedbackToIS !== undefined) result.feedback_to_is = data.feedbackToIS
   if (data.feedback !== undefined) result.feedback = data.feedback
+  if (data.dealStarted !== undefined) result.deal_started = data.dealStarted
+  if (data.dealEnded !== undefined) result.deal_ended = data.dealEnded
+  if (data.dealStartedAt !== undefined) result.deal_started_at = data.dealStartedAt
+  if (data.dealDurationMinutes !== undefined) result.deal_duration_minutes = data.dealDurationMinutes
+  // 商談実施状況
+  if (data.dealExecutionStatus !== undefined) result.deal_execution_status = data.dealExecutionStatus
+  // BANT情報
+  if (data.bantBudget !== undefined) result.bant_budget = data.bantBudget
+  if (data.bantAuthority !== undefined) result.bant_authority = data.bantAuthority
+  if (data.bantNeed !== undefined) result.bant_need = data.bantNeed
+  if (data.bantTimeline !== undefined) result.bant_timeline = data.bantTimeline
+  if (data.bantMemo !== undefined) result.bant_memo = data.bantMemo
+  // 競合・自己対応状況
+  if (data.competitorStatus !== undefined) result.competitor_status = data.competitorStatus
+  if (data.selfHandlingStatus !== undefined) result.self_handling_status = data.selfHandlingStatus
+  if (data.competitorMemo !== undefined) result.competitor_memo = data.competitorMemo
+  // 商談履歴（1回目）
+  if (data.dealPhase1 !== undefined) result.deal_phase1 = data.dealPhase1
+  if (data.phaseUpdateDate1 !== undefined) result.phase_update_date1 = data.phaseUpdateDate1
+  if (data.rankEstimate1 !== undefined) result.rank_estimate1 = data.rankEstimate1
+  if (data.dealMemo1 !== undefined) result.deal_memo1 = data.dealMemo1
+  // 商談履歴（2回目）
+  if (data.dealPhase2 !== undefined) result.deal_phase2 = data.dealPhase2
+  if (data.phaseUpdateDate2 !== undefined) result.phase_update_date2 = data.phaseUpdateDate2
+  if (data.rankEstimate2 !== undefined) result.rank_estimate2 = data.rankEstimate2
+  if (data.dealMemo2 !== undefined) result.deal_memo2 = data.dealMemo2
+  // 商談履歴（3回目）
+  if (data.dealPhase3 !== undefined) result.deal_phase3 = data.dealPhase3
+  if (data.phaseUpdateDate3 !== undefined) result.phase_update_date3 = data.phaseUpdateDate3
+  if (data.rankEstimate3 !== undefined) result.rank_estimate3 = data.rankEstimate3
+  if (data.dealMemo3 !== undefined) result.deal_memo3 = data.dealMemo3
+  // アクション管理
+  if (data.actionMemo !== undefined) result.action_memo = data.actionMemo
+  if (data.actionHistoryDate !== undefined) result.action_history_date = data.actionHistoryDate
+  if (data.actionHistoryContent !== undefined) result.action_history_content = data.actionHistoryContent
+  if (data.actionHistoryMemo !== undefined) result.action_history_memo = data.actionHistoryMemo
+  // 商談最終結果
+  if (data.finalResult !== undefined) result.final_result = data.finalResult
+  if (data.resultMemo !== undefined) result.result_memo = data.resultMemo
+  // 成約情報
+  if (data.contractReason !== undefined) result.contract_reason = data.contractReason
+  if (data.contractMemo !== undefined) result.contract_memo = data.contractMemo
+  // 失注情報
+  if (data.lostMemo !== undefined) result.lost_memo = data.lostMemo
+  // 改善・学習記録
+  if (data.learningRecord !== undefined) result.learning_record = data.learningRecord
+  if (data.learningRecordDate !== undefined) result.learning_record_date = data.learningRecordDate
+  if (data.learningRecordTitle !== undefined) result.learning_record_title = data.learningRecordTitle
+  if (data.learningRecordCategory !== undefined) result.learning_record_category = data.learningRecordCategory
+  // ニーズ温度
+  if (data.needTemperature !== undefined) result.need_temperature = data.needTemperature
+  // 商談自己採点
+  if (data.selfQ1 !== undefined) result.self_q1 = data.selfQ1
+  if (data.selfQ2 !== undefined) result.self_q2 = data.selfQ2
+  if (data.selfQ3 !== undefined) result.self_q3 = data.selfQ3
+  if (data.selfQ4 !== undefined) result.self_q4 = data.selfQ4
+  if (data.selfQ5 !== undefined) result.self_q5 = data.selfQ5
+  if (data.selfQ6 !== undefined) result.self_q6 = data.selfQ6
+  if (data.selfQ7 !== undefined) result.self_q7 = data.selfQ7
+  if (data.selfTotalScore !== undefined) result.self_total_score = data.selfTotalScore
+  if (data.improvementTheme !== undefined) result.improvement_theme = data.improvementTheme
+  if (data.reflectionMemo !== undefined) result.reflection_memo = data.reflectionMemo
   return result
 }
 

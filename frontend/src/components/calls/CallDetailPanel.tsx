@@ -997,7 +997,7 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                 )}
                 {statusIsText && isAppointment && (
                   <div className="mb-3 text-sm text-gray-600">
-                    このISステータス：商談獲得入力（商談獲得日/商談設定日/商談時間/商談予定者）
+                    このISステータス：商談獲得入力（商談獲得日/商談設定日/商談時間/商談予定者/ニーズ温度）
                   </div>
                 )}
                 {statusIsText && isDisqualified && (
@@ -1142,6 +1142,21 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                             {option.label}
                           </option>
                         ))}
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="label">ニーズ温度（IS判定）<span className="text-red-500 text-xs ml-0.5">*</span></label>
+                      <select
+                        aria-label="ニーズ温度"
+                        value={formData.needTemperature || ''}
+                        onChange={(e) => handleChange('needTemperature', e.target.value)}
+                        className="input"
+                        title="A: 期限あり・困り大 / B: 条件次第・検討 / C: 情報収集・低温"
+                      >
+                        <option value="">選択してください</option>
+                        <option value="A" title="期限あり・困り大">A: 期限あり・困り大</option>
+                        <option value="B" title="条件次第・検討">B: 条件次第・検討</option>
+                        <option value="C" title="情報収集・低温">C: 情報収集・低温</option>
                       </select>
                     </div>
                   </div>

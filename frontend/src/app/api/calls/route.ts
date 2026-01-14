@@ -86,6 +86,7 @@ function toCamelCase(record: any) {
     dealStaffFS: record.deal_staff_fs,
     dealResult: record.deal_result,
     lostReasonFS: record.lost_reason_fs,
+    needTemperature: record.need_temperature,
     customerType: record.customer_type,
     disqualifyReason: record.disqualify_reason,
     unreachableReason: record.unreachable_reason,
@@ -163,6 +164,7 @@ function toSnakeCase(data: any) {
   if (data.dealStaffFS !== undefined) result.deal_staff_fs = data.dealStaffFS
   if (data.dealResult !== undefined) result.deal_result = data.dealResult
   if (data.lostReasonFS !== undefined) result.lost_reason_fs = data.lostReasonFS
+  if (data.needTemperature !== undefined) result.need_temperature = data.needTemperature
   if (data.customerType !== undefined) result.customer_type = data.customerType
   if (data.disqualifyReason !== undefined) result.disqualify_reason = data.disqualifyReason
   if (data.unreachableReason !== undefined) result.unreachable_reason = data.unreachableReason
@@ -391,9 +393,13 @@ export async function PATCH(request: NextRequest) {
           meetsmore_link: data.meetsmore_link,
           conversation_memo: data.conversation_memo,
           staff_is: data.staff_is,
+          status_is: data.status_is,
+          status_update_date: data.status_update_date,
           appointment_date: data.appointment_date,
           deal_setup_date: data.deal_setup_date,
           deal_time: data.deal_time,
+          deal_staff_fs: data.deal_staff_fs,
+          need_temperature: data.need_temperature,
           service: 'RO:開業（融資）',
           category: 'A:飲食',
           rank: 'C:20%',

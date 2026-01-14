@@ -20,7 +20,7 @@ type NavSeparator = {
 type NavElement = NavItem | NavSeparator
 
 const navigation: NavElement[] = [
-  { name: 'ダッシュボード', href: '/dashboard', icon: HomeIcon },
+  { name: 'ダッシュボード', href: '/dashboard', icon: HomeIcon, badge: '構築中' },
   
   // 営業活動
   { type: 'separator', label: '営業活動' },
@@ -32,15 +32,15 @@ const navigation: NavElement[] = [
   // 分析・改善
   { type: 'separator', label: '分析・改善' },
   { name: '売上・成約分析', href: '/analysis/sales', icon: ChartPieIcon },
-  { name: 'リード連携分析', href: '/analysis/leads', icon: ChartBarIcon, badge: 'New' },
-  { name: '架電結果分析', href: '/analysis/calls', icon: PhoneIcon },
-  { name: '商談結果分析', href: '/analysis/field', icon: ChartBarIcon },
-  { name: '架電プロセス分析', href: '/analysis/calls-process', icon: ChartBarIcon, badge: 'New' },
-  { name: '商談プロセス分析', href: '/analysis/deals-process', icon: ChartBarIcon, badge: 'New' },
+  { name: 'リード連携分析', href: '/analysis/leads', icon: ChartBarIcon, badge: '構築中' },
+  { name: '架電結果分析', href: '/analysis/calls', icon: PhoneIcon, badge: '構築中' },
+  { name: '商談結果分析', href: '/analysis/field', icon: ChartBarIcon, badge: '構築中' },
+  { name: '架電プロセス分析', href: '/analysis/calls-process', icon: ChartBarIcon, badge: '構築中' },
+  { name: '商談プロセス分析', href: '/analysis/deals-process', icon: ChartBarIcon, badge: '構築中' },
   
   // 成長・学習
   { type: 'separator', label: '学習' },
-  { name: 'ナレッジセンター', href: '/learning', icon: AcademicCapIcon, badge: 'New' },
+  { name: 'ナレッジセンター', href: '/learning', icon: AcademicCapIcon, badge: '構築中' },
   { name: 'ユーザーマニュアル', href: '/manual', icon: BookOpenIcon },
   
   { name: '設定', href: '/settings', icon: CogIcon },
@@ -199,9 +199,9 @@ export function Sidebar() {
                   {navItem.name}
                 </span>
               )}
-              {/* Newバッジ */}
+              {/* バッジ */}
               {!isCollapsed && navItem.badge && (
-                <span className="px-1.5 py-0.5 text-[10px] font-bold text-white rounded" style={{ backgroundColor: '#00a4c5' }}>
+                <span className="px-1.5 py-0.5 text-[10px] font-bold text-white rounded" style={{ backgroundColor: '#6b7280' }}>
                   {navItem.badge}
                 </span>
               )}

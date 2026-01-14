@@ -1544,7 +1544,9 @@ export default function CallsPage() {
     return plannedMinutes - workMinutes
   }, [plannedWorkHours, timerMetrics.workMs])
 
-  const isInProgress = (r: CallRecord) => r.status === '架電中' && !r.endedAt && r.todayCallStatus !== '済'
+  // 架電中の定義: 通電ボタンを押して（connectedAtあり）、終了していない（endedAtなし）場合のみ
+  // 不通の場合は架電中ではない（開始→不通→次へ、の流れで終了ボタンは押さない）
+  const isInProgress = (r: CallRecord) => !!r.connectedAt && !r.endedAt
 
   const getInProgressRecord = () => {
     // 原則: 「終了」されていない架電（架電中/通電）は同時に1件のみ
@@ -2091,15 +2093,18 @@ export default function CallsPage() {
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-700">架電リスト</span>
-                    <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+                    {/* 3状態ボタン: 選択中=濃青背景白文字, アクティブ=白背景青文字青枠hover青薄背景, 非アクティブ=グレー背景薄文字 */}
+                    <div className="inline-flex rounded-md overflow-hidden gap-1">
                       <button
                         type="button"
                         onClick={() => {
                           callListViewUserSetRef.current = true
                           setCallListView('today')
                         }}
-                        className={`px-3 py-1.5 text-sm font-medium ${
-                          callListView === 'today' ? 'bg-primary-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150 ${
+                          callListView === 'today'
+                            ? 'bg-primary-600 text-white'
+                            : 'bg-white text-primary-600 border-2 border-primary-300 hover:bg-primary-50 hover:border-primary-400'
                         }`}
                       >
                         本日
@@ -2111,10 +2116,12 @@ export default function CallsPage() {
                           setCallListView('previous')
                         }}
                         disabled={!previousCallList}
-                        className={`px-3 py-1.5 text-sm font-medium border-l border-gray-300 ${
-                          callListView === 'previous'
-                            ? 'bg-primary-600 text-white'
-                            : 'bg-white text-gray-700 hover:bg-gray-50 disabled:text-gray-300 disabled:hover:bg-white'
+                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150 ${
+                          !previousCallList
+                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            : callListView === 'previous'
+                              ? 'bg-primary-600 text-white'
+                              : 'bg-white text-primary-600 border-2 border-primary-300 hover:bg-primary-50 hover:border-primary-400'
                         }`}
                         title="前回（直近の過去リスト）を表示"
                       >
