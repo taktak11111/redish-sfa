@@ -44,27 +44,34 @@ async function checkAdminPermission(supabase: any) {
 // GET: ユーザー一覧取得
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    // NextAuthの認証チェック
     const authResult = await requireAuth()
     if (authResult instanceof NextResponse) {
       return authResult
     }
+    
+    // NextAuthのセッションからメールアドレスを取得
+    const sessionEmail = authResult.user?.email
+    console.log('[API/users] Session email:', sessionEmail)
 
-    // 開発環境では、サービスロールキーを使用してRLSをバイパス
+    // サービスロールキーを使用してRLSをバイパス（NextAuth使用のためSupabase認証セッションがない）
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!serviceRoleKey) {
+      console.error('[API/users] SUPABASE_SERVICE_ROLE_KEY is not set')
+      return NextResponse.json(
+        { error: 'サーバー設定エラー', hint: 'SUPABASE_SERVICE_ROLE_KEY が設定されていません' },
+        { status: 500 }
+      )
+    }
+    
+    const client = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceRoleKey,
+      { auth: { persistSession: false } }
+    )
+    
+    // 開発環境では全ユーザー取得
     if (process.env.NODE_ENV === 'development') {
-      // サービスロールキーが利用可能な場合は使用（RLSをバイパス）
-      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-      let client = supabase
-      
-      if (serviceRoleKey) {
-        // サービスロールキーを使用してクライアントを作成
-        client = createSupabaseClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          serviceRoleKey,
-          { auth: { persistSession: false } }
-        ) as any
-      }
-      
       const { data, error } = await client
         .from('users')
         .select('*')
@@ -72,7 +79,6 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         console.error('[API/users] Error:', error)
-        console.error('[API/users] Error details:', JSON.stringify(error, null, 2))
         return NextResponse.json(
           { error: 'ユーザー一覧の取得に失敗しました', details: error.message },
           { status: 500 }
@@ -83,24 +89,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ users: data || [] })
     }
 
-    // 本番環境: adminのみ全ユーザー取得、それ以外は自分の情報のみ
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    // 本番環境: メールアドレスでユーザーを特定し、権限に応じてデータ返却
+    if (!sessionEmail) {
       return NextResponse.json(
-        { error: '認証が必要です' },
+        { error: 'セッションにメールアドレスがありません' },
         { status: 401 }
       )
     }
-
-    const { data: currentUser } = await supabase
+    
+    // 現在のユーザーを取得（メールアドレスで検索）
+    const { data: currentUser, error: currentUserError } = await client
       .from('users')
-      .select('role')
-      .eq('id', user.id)
+      .select('id, role')
+      .eq('email', sessionEmail)
       .single()
+
+    if (currentUserError) {
+      console.error('[API/users] Current user lookup error:', currentUserError)
+      // ユーザーが見つからない場合でも空配列を返す（初回ログイン対応）
+      return NextResponse.json({ users: [] })
+    }
 
     if (currentUser?.role === 'admin') {
       // adminは全ユーザー取得
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from('users')
         .select('*')
         .order('created_at', { ascending: false })
@@ -116,10 +128,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ users: data || [] })
     } else {
       // それ以外は自分の情報のみ
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from('users')
         .select('*')
-        .eq('id', user.id)
+        .eq('email', sessionEmail)
         .single()
 
       if (error) {
