@@ -173,6 +173,13 @@ export default function ContractsPage() {
   })
   // 成約後ワークフロー進捗の仮state（フィールド未実装のため）
   const [workflowStatus, setWorkflowStatus] = useState<Record<string, { contractSigned: boolean; paymentDocCompleted: boolean; paymentConfirmed: boolean }>>({})
+  type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+  const [saveUi, setSaveUi] = useState<{
+    savingDealId?: string
+    savedDealId?: string
+    errorDealId?: string
+    errorMessage?: string
+  }>({})
   const [resizingColumn, setResizingColumn] = useState<string | null>(null)
   const [resizeStartX, setResizeStartX] = useState(0)
   const [resizeStartWidth, setResizeStartWidth] = useState(0)
@@ -307,8 +314,17 @@ export default function ContractsPage() {
       if (!response.ok) throw new Error('Failed to update contract')
       return response.json()
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['contracts'] })
+      setSaveUi({
+        savedDealId: variables.dealId,
+      })
+    },
+    onError: (error, variables) => {
+      setSaveUi({
+        errorDealId: variables.dealId,
+        errorMessage: error instanceof Error ? error.message : '保存に失敗しました',
+      })
     },
   })
 
@@ -398,6 +414,8 @@ export default function ContractsPage() {
   const handleRowClick = (contract: Deal) => {
     setSelectedContract(contract)
     setIsPanelOpen(true)
+    // 別レコードに移動したら保存状態表示はリセット
+    setSaveUi({})
   }
 
   const handlePanelClose = () => {
@@ -408,9 +426,22 @@ export default function ContractsPage() {
   const handlePanelSave = (updates: Partial<Deal>) => {
     if (selectedContract) {
       const dealId = (selectedContract as any).dealId || selectedContract.id
+      setSaveUi({ savingDealId: dealId })
       updateMutation.mutate({ dealId, updates })
-      handlePanelClose()
+      // 画面上の反映（即時フィードバック）
+      setSelectedContract(prev => (prev ? { ...prev, ...updates } : prev))
     }
+  }
+
+  const handlePanelDirty = () => {
+    if (!selectedContract) return
+    const dealId = (selectedContract as any).dealId || selectedContract.id
+    setSaveUi(prev => {
+      if (prev.savedDealId === dealId || prev.errorDealId === dealId) {
+        return {}
+      }
+      return prev
+    })
   }
 
   const handleResizeStart = (columnKey: string, e: React.MouseEvent) => {
@@ -955,6 +986,15 @@ export default function ContractsPage() {
       {/* サービス種別に応じた詳細パネルを表示 */}
       {isPanelOpen && selectedContract && (() => {
         const serviceType = getServiceType(selectedContract.service)
+        const currentDealId = (selectedContract as any).dealId || selectedContract.id || ''
+        const saveState: SaveState =
+          saveUi.savingDealId === currentDealId
+            ? 'saving'
+            : saveUi.savedDealId === currentDealId
+              ? 'saved'
+              : saveUi.errorDealId === currentDealId
+                ? 'error'
+                : 'idle'
         switch (serviceType) {
           case 'finance':
             return (
@@ -963,6 +1003,9 @@ export default function ContractsPage() {
                 onClose={handlePanelClose}
                 onSave={handlePanelSave}
                 isSaving={updateMutation.isPending}
+                saveState={saveState}
+                saveError={saveUi.errorMessage}
+                onDirty={handlePanelDirty}
               />
             )
           case 'marketing':
@@ -972,6 +1015,9 @@ export default function ContractsPage() {
                 onClose={handlePanelClose}
                 onSave={handlePanelSave}
                 isSaving={updateMutation.isPending}
+                saveState={saveState}
+                saveError={saveUi.errorMessage}
+                onDirty={handlePanelDirty}
               />
             )
           default:
@@ -981,6 +1027,9 @@ export default function ContractsPage() {
                 onClose={handlePanelClose}
                 onSave={handlePanelSave}
                 isSaving={updateMutation.isPending}
+                saveState={saveState}
+                saveError={saveUi.errorMessage}
+                onDirty={handlePanelDirty}
               />
             )
         }

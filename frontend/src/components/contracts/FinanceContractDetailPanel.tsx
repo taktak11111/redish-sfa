@@ -79,6 +79,9 @@ interface FinanceContractDetailPanelProps {
   onClose: () => void
   onSave: (updates: Partial<Deal>) => void
   isSaving: boolean
+  saveState?: 'idle' | 'saving' | 'saved' | 'error'
+  saveError?: string
+  onDirty?: () => void
   workflowStatus?: WorkflowStatus
   onWorkflowUpdate?: (status: Partial<WorkflowStatus>) => void
 }
@@ -88,6 +91,9 @@ export function FinanceContractDetailPanel({
   onClose, 
   onSave, 
   isSaving,
+  saveState = 'idle',
+  saveError,
+  onDirty,
   workflowStatus: initialWorkflowStatus,
   onWorkflowUpdate 
 }: FinanceContractDetailPanelProps) {
@@ -118,18 +124,27 @@ export function FinanceContractDetailPanel({
 
   useEffect(() => {
     setFormData(contract)
-    setContractFormData(prev => ({
-      ...prev,
-      contractDate: contract.resultDate,
-      representativeName: contract.contactName,
-      representativeNameKana: contract.contactNameKana,
-      tel: contract.phone,
-      mail: contract.email,
-      storeName: contract.companyName,
+    const stored = (contract as any)?.sourceSpecificData?.contractDetails?.finance
+    const storedForm: Partial<FinanceContractFormData> = stored?.contractFormData || {}
+    setContractFormData(() => ({
+      ...storedForm,
+      contractDate: storedForm.contractDate ?? contract.resultDate,
+      representativeName: storedForm.representativeName ?? contract.contactName,
+      representativeNameKana: storedForm.representativeNameKana ?? contract.contactNameKana,
+      tel: storedForm.tel ?? contract.phone,
+      mail: storedForm.mail ?? contract.email,
+      storeName: storedForm.storeName ?? contract.companyName,
       // 融資サービスのデフォルト料金
-      initialFee: 30000,
-      successFeeRate: 3.5,
+      initialFee: storedForm.initialFee ?? 30000,
+      successFeeRate: storedForm.successFeeRate ?? 3.5,
+      successFee: storedForm.successFee ?? stored?.contractFormData?.successFee,
     }))
+    if (stored?.paymentData) {
+      setPaymentData(stored.paymentData)
+    }
+    if (stored?.workflowStatus) {
+      setWorkflowStatus(stored.workflowStatus)
+    }
   }, [contract])
 
   const handleContractFormChange = (field: keyof FinanceContractFormData, value: string | number | boolean | undefined) => {
@@ -143,15 +158,37 @@ export function FinanceContractDetailPanel({
       }
       return updated
     })
+    onDirty?.()
   }
 
   const handlePaymentChange = (field: keyof PaymentData, value: string | number | undefined) => {
     setPaymentData(prev => ({ ...prev, [field]: value }))
+    onDirty?.()
+  }
+
+  const buildSourceSpecificDataUpdate = () => {
+    const existing = (formData as any).sourceSpecificData || (contract as any).sourceSpecificData || {}
+    const contractDetails = (existing.contractDetails && typeof existing.contractDetails === 'object') ? existing.contractDetails : {}
+    return {
+      ...existing,
+      contractDetails: {
+        ...contractDetails,
+        finance: {
+          contractFormData,
+          paymentData,
+          workflowStatus,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    }
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSave(formData)
+    onSave({
+      ...formData,
+      sourceSpecificData: buildSourceSpecificDataUpdate(),
+    })
   }
 
   const toggleSection = (section: string) => {
@@ -554,7 +591,21 @@ export function FinanceContractDetailPanel({
         {/* フッター */}
         <div className="bg-white border-t border-gray-200 px-6 py-4 flex justify-end gap-3 flex-shrink-0">
           <button type="button" onClick={onClose} className="btn-secondary">閉じる</button>
-          <button type="button" onClick={handleSubmit} disabled={isSaving} className="btn-primary">{isSaving ? '保存中...' : '保存'}</button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSaving}
+            className={saveState === 'saved' ? 'btn-success' : 'btn-primary'}
+            title={saveState === 'error' ? (saveError || '保存に失敗しました') : undefined}
+          >
+            {isSaving
+              ? '保存中...'
+              : saveState === 'saved'
+                ? '✅ 保存済'
+                : saveState === 'error'
+                  ? '⚠️ 保存（要再試行）'
+                  : '保存'}
+          </button>
         </div>
       </div>
     </>

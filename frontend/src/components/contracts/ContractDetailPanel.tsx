@@ -123,6 +123,9 @@ interface ContractDetailPanelProps {
   onClose: () => void
   onSave: (updates: Partial<Deal>) => void
   isSaving: boolean
+  saveState?: 'idle' | 'saving' | 'saved' | 'error'
+  saveError?: string
+  onDirty?: () => void
   workflowStatus?: WorkflowStatus
   onWorkflowUpdate?: (status: Partial<WorkflowStatus>) => void
 }
@@ -132,6 +135,9 @@ export function ContractDetailPanel({
   onClose, 
   onSave, 
   isSaving,
+  saveState = 'idle',
+  saveError,
+  onDirty,
   workflowStatus: initialWorkflowStatus,
   onWorkflowUpdate 
 }: ContractDetailPanelProps) {
@@ -273,47 +279,64 @@ export function ContractDetailPanel({
     // 契約担当者のデフォルト（商談担当者）
     const defaultContractStaff = contract.dealStaffFS || contract.staffIS || ''
     
-    // 契約情報の初期値を設定（商談から引き継ぐフィールド + デフォルト値 + 自動計算）
-    setContractFormData(prev => ({
-      ...prev,
+    const stored = (contract as any)?.sourceSpecificData?.contractDetails?.tax
+    const storedForm: Partial<ContractFormData> = stored?.contractFormData || {}
+
+    // 契約情報の初期値を設定（保存済み値 > 商談から継承 > デフォルト値）
+    setContractFormData(() => ({
+      ...storedForm,
       // 1. 契約情報
       contractDate: contract.resultDate,
-      contractStaff: prev.contractStaff ?? (defaultContractStaff || undefined),
+      contractStaff: storedForm.contractStaff ?? (defaultContractStaff || undefined),
       
       // 2. 顧客情報（SFA連動）
-      businessType: prev.businessType ?? (contract.category || 'A:飲食'),
-      entityType: prev.entityType ?? '個人',
-      representativeName: contract.contactName,
-      representativeNameKana: contract.contactNameKana,
-      tel: contract.phone,
-      mail: contract.email,
-      corporateName: contract.companyName,
+      businessType: storedForm.businessType ?? (contract.category || 'A:飲食'),
+      entityType: storedForm.entityType ?? '個人',
+      representativeName: storedForm.representativeName ?? contract.contactName,
+      representativeNameKana: storedForm.representativeNameKana ?? contract.contactNameKana,
+      tel: storedForm.tel ?? contract.phone,
+      mail: storedForm.mail ?? contract.email,
+      corporateName: storedForm.corporateName ?? contract.companyName,
       
       // 3. 店舗情報（SFA連動）
-      storeName: contract.companyName,
-      openingAddress: contract.address,
-      openingYear: prev.openingYear ?? String(currentYear),
-      employeeCount: prev.employeeCount ?? 1,
+      storeName: storedForm.storeName ?? contract.companyName,
+      openingAddress: storedForm.openingAddress ?? contract.address,
+      openingYear: storedForm.openingYear ?? String(currentYear),
+      employeeCount: storedForm.employeeCount ?? 1,
       
       // 4. サービス費用（デフォルト値）
-      initialFee: prev.initialFee ?? 50000,
-      monthlyBookkeepingFee: prev.monthlyBookkeepingFee ?? 10000,
-      taxReturnFee: prev.taxReturnFee ?? 100000,
+      initialFee: storedForm.initialFee ?? 50000,
+      monthlyBookkeepingFee: storedForm.monthlyBookkeepingFee ?? 10000,
+      taxReturnFee: storedForm.taxReturnFee ?? 100000,
 
       // 顧客情報のデフォルト
-      storeCount: prev.storeCount ?? 1,
+      storeCount: storedForm.storeCount ?? 1,
 
       // 6. 請求関連（デフォルト）
-      fiscalYear: prev.fiscalYear ?? String(currentYear),
+      fiscalYear: storedForm.fiscalYear ?? String(currentYear),
       
       // 7. 契約期日（自動計算）
       ...calculatedDates,
     }))
     // 口座振替書類のメールアドレス初期値
-    setBankDocumentData(prev => ({
-      ...prev,
-      requestEmail: contract.email,
-    }))
+    if (stored?.bankDocumentData) {
+      setBankDocumentData({
+        ...stored.bankDocumentData,
+        requestEmail: stored.bankDocumentData.requestEmail ?? contract.email,
+      })
+    } else {
+      setBankDocumentData(prev => ({
+        ...prev,
+        requestEmail: contract.email,
+      }))
+    }
+
+    if (stored?.paymentData) {
+      setPaymentData(stored.paymentData)
+    }
+    if (stored?.workflowStatus) {
+      setWorkflowStatus(stored.workflowStatus)
+    }
   }, [contract])
 
   // 顧客番号の自動採番（スプレッドシートから最大値取得→+1）
@@ -353,6 +376,7 @@ export function ContractDetailPanel({
 
   const handleChange = (field: keyof Deal, value: string | number | undefined) => {
     setFormData(prev => ({ ...prev, [field]: value }))
+    onDirty?.()
   }
 
   const handleContractFormChange = (field: keyof ContractFormData, value: string | number | boolean | undefined) => {
@@ -372,14 +396,35 @@ export function ContractDetailPanel({
       
       return updated
     })
+    onDirty?.()
   }
 
   const handleBankDocumentChange = (field: keyof BankDocumentData, value: string | undefined) => {
     setBankDocumentData(prev => ({ ...prev, [field]: value }))
+    onDirty?.()
   }
 
   const handlePaymentChange = (field: keyof PaymentData, value: string | number | undefined) => {
     setPaymentData(prev => ({ ...prev, [field]: value }))
+    onDirty?.()
+  }
+
+  const buildSourceSpecificDataUpdate = () => {
+    const existing = (formData as any).sourceSpecificData || (contract as any).sourceSpecificData || {}
+    const contractDetails = (existing.contractDetails && typeof existing.contractDetails === 'object') ? existing.contractDetails : {}
+    return {
+      ...existing,
+      contractDetails: {
+        ...contractDetails,
+        tax: {
+          contractFormData,
+          bankDocumentData,
+          paymentData,
+          workflowStatus,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    }
   }
 
   // 契約フォーム（contractFormData）の入力を、Deal更新に反映できるフィールドへ写像する
@@ -422,6 +467,7 @@ export function ContractDetailPanel({
     onSave({
       ...formData,
       ...buildDealUpdatesFromContractFormData(),
+      sourceSpecificData: buildSourceSpecificDataUpdate(),
     })
   }
 
@@ -1219,7 +1265,21 @@ export function ContractDetailPanel({
         {/* フッター */}
         <div className="bg-white border-t border-gray-200 px-6 py-4 flex justify-end gap-3 flex-shrink-0">
           <button type="button" onClick={onClose} className="btn-secondary">閉じる</button>
-          <button type="button" onClick={handleSubmit} disabled={isSaving} className="btn-primary">{isSaving ? '保存中...' : '保存'}</button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSaving}
+            className={saveState === 'saved' ? 'btn-success' : 'btn-primary'}
+            title={saveState === 'error' ? (saveError || '保存に失敗しました') : undefined}
+          >
+            {isSaving
+              ? '保存中...'
+              : saveState === 'saved'
+                ? '✅ 保存済'
+                : saveState === 'error'
+                  ? '⚠️ 保存（要再試行）'
+                  : '保存'}
+          </button>
         </div>
       </div>
 
