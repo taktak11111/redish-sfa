@@ -631,6 +631,15 @@ export default function SettingsContent() {
       fetchRecords()
     }
   }, [activeSection, spreadsheetSubTab, recordsFilter])
+
+  // ヘルスチェックタブが選択されたときに一覧を取得
+  // Note: このuseEffectは早期リターン(if !settings)より前に配置する必要がある（フック数の一貫性のため）
+  useEffect(() => {
+    if (activeSection === 'healthCheck') {
+      fetchHealthIssues()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, healthStatusFilter])
   
   // 設定をデータベースに同期する関数（APIルート経由）
   const syncConfigsToDB = async (configs: SavedSpreadsheetConfig[]) => {
@@ -657,14 +666,8 @@ export default function SettingsContent() {
     }
   }
 
-  // 設定が読み込まれるまで表示しない
-  if (!settings) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">読み込み中...</div>
-      </div>
-    )
-  }
+  // Note: 早期リターンはフックの数の一貫性を崩すため削除。
+  // settingsがnullの場合のローディング表示はJSXの中で行う。
 
   const handleEdit = () => {
     setIsEditing(true)
@@ -1489,14 +1492,6 @@ export default function SettingsContent() {
     }
   }
 
-  // ヘルスチェックタブが選択されたときに一覧を取得
-  useEffect(() => {
-    if (activeSection === 'healthCheck') {
-      fetchHealthIssues()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSection, healthStatusFilter])
-
   const sections = [
     {
       id: 'call',
@@ -1567,6 +1562,15 @@ export default function SettingsContent() {
       fields: [],
     },
   ]
+
+  // settingsがnullの場合はローディング表示
+  if (!settings) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">読み込み中...</div>
+      </div>
+    )
+  }
 
   return (
     <div>
