@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/guard'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
+export const dynamic = 'force-dynamic'
+
 // GET: ドロップダウン設定取得
 export async function GET(request: NextRequest) {
   try {

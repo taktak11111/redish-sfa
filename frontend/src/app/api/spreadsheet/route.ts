@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { requireAuth } from '@/lib/auth/guard'
+import { DEFAULT_SETTINGS } from '@/lib/dropdownSettings'
 
 // Supabase設定
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -18,6 +20,68 @@ function getSupabaseClient(): SupabaseClient {
     })
   }
   return supabaseClient
+}
+
+function normalizeValue(v: unknown): string {
+  return String(v ?? '').trim()
+}
+
+function isMissingTableError(err: any, tableName: string): boolean {
+  const msg = String(err?.message ?? '')
+  return msg.includes('does not exist') && msg.includes(tableName)
+}
+
+function mergeSampleRecordIds(existing: unknown, toAdd: string[], limit: number): string[] {
+  const base = Array.isArray(existing) ? (existing as unknown[]) : []
+  const out: string[] = []
+  const seen = new Set<string>()
+
+  for (const v of base) {
+    const s = String(v ?? '').trim()
+    if (!s || seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+  }
+
+  for (const v of toAdd) {
+    const s = String(v ?? '').trim()
+    if (!s || seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+    if (out.length >= limit) break
+  }
+
+  return out.slice(0, limit)
+}
+
+async function loadAllowedOpeningPeriodValues(supabase: SupabaseClient): Promise<Set<string>> {
+  // DBのdropdown_settings（key=openingPeriod）を優先。なければDEFAULT_SETTINGSへフォールバック。
+  try {
+    const { data, error } = await supabase
+      .from('dropdown_settings')
+      .select('options')
+      .eq('key', 'openingPeriod')
+
+    if (error) throw error
+
+    const out = new Set<string>()
+    for (const row of data || []) {
+      const options = (row as any)?.options
+      if (!Array.isArray(options)) continue
+      for (const o of options) {
+        const nv = normalizeValue((o as any)?.value)
+        if (nv) out.add(nv)
+      }
+    }
+
+    if (out.size > 0) return out
+  } catch (e: any) {
+    if (!isMissingTableError(e, 'dropdown_settings')) {
+      console.warn('[API/spreadsheet] Failed to load dropdown_settings for openingPeriod, fallback to defaults:', e?.message)
+    }
+  }
+
+  return new Set(DEFAULT_SETTINGS.openingPeriod.map((o) => normalizeValue(o.value)).filter(Boolean))
 }
 
 // カラムマッピングの型
@@ -350,14 +414,20 @@ export async function GET(request: NextRequest) {
 // POST: データをインポート
 export async function POST(request: NextRequest) {
   try {
+    const authResult = await requireAuth()
+    if (authResult instanceof NextResponse) {
+      return authResult
+    }
+
     const body = await request.json()
-    const { spreadsheetId, sheetName = 'Sheet1', sheetGid, columnMappings, headerRow = 1, leadSourcePrefix } = body as {
+    const { spreadsheetId, sheetName = 'Sheet1', sheetGid, columnMappings, headerRow = 1, leadSourcePrefix, spreadsheetConfigId } = body as {
       spreadsheetId: string
       sheetName: string
       sheetGid?: string
       columnMappings: ColumnMapping[]
       headerRow?: number
       leadSourcePrefix?: string
+      spreadsheetConfigId?: string
     }
     
     if (!spreadsheetId) {
@@ -390,10 +460,49 @@ export async function POST(request: NextRequest) {
     })
     
     const supabase = getSupabaseClient()
+    const allowedOpeningPeriods = await loadAllowedOpeningPeriodValues(supabase)
+
+    // import_runs を作成（テーブル未作成ならスキップ）
+    const nowIso = new Date().toISOString()
+    let importRunId: string | null = null
+    try {
+      let createdBy: string | null = null
+      const email = (authResult as any)?.user?.email
+      if (email) {
+        const { data: userRow } = await supabase
+          .from('users')
+          .select('id')
+          .eq('email', email)
+          .single()
+        createdBy = userRow?.id ?? null
+      }
+
+      const { data: importRun, error: importRunError } = await supabase
+        .from('import_runs')
+        .insert({
+          spreadsheet_config_id: spreadsheetConfigId ?? null,
+          status: 'running',
+          started_at: nowIso,
+          imported_count: 0,
+          needs_review_count: 0,
+          created_by: createdBy,
+          created_at: nowIso,
+        })
+        .select('id')
+        .single()
+
+      if (importRunError) throw importRunError
+      importRunId = importRun?.id ?? null
+    } catch (e: any) {
+      if (!isMissingTableError(e, 'import_runs')) {
+        console.warn('[API/spreadsheet] Failed to create import_runs row:', e?.message)
+      }
+    }
     
     let imported = 0
     let failed = 0
     const errors: string[] = []
+    const openingPeriodUnknowns = new Map<string, { observedValue: string; count: number; sampleRecordIds: string[] }>()
     
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       const row = rows[rowIndex]
@@ -408,6 +517,7 @@ export async function POST(request: NextRequest) {
         
         let leadSource = 'REDISH' // デフォルト
         const sourceSpecificData: Record<string, any> = {} // リードソース別情報を格納
+        let openingDateObserved: string | null = null
         
         for (const mapping of columnMappings) {
           if (!mapping.targetField) continue
@@ -420,6 +530,9 @@ export async function POST(request: NextRequest) {
           
           if (mapping.targetField === 'leadSource') {
             leadSource = value
+          }
+          if (mapping.targetField === 'openingDate') {
+            openingDateObserved = value
           }
           
           // リードソース別情報のチェック
@@ -469,7 +582,9 @@ export async function POST(request: NextRequest) {
           .select('lead_id')
           .eq('phone', recordData.phone)
           .single()
-        
+
+        let leadIdForSample: string | null = existing?.lead_id ?? null
+
         if (existing) {
           // 既存レコードを更新
           const { error: updateError } = await supabase
@@ -488,6 +603,7 @@ export async function POST(request: NextRequest) {
           recordData.lead_source = leadSource
           recordData.lead_id = await generateLeadId(supabase, leadSource, leadSourcePrefix)
           recordData.linked_date = recordData.linked_date || new Date().toISOString().split('T')[0]
+          leadIdForSample = recordData.lead_id
           
           const { error: insertError } = await supabase
             .from('call_records')
@@ -500,6 +616,24 @@ export async function POST(request: NextRequest) {
             imported++
           }
         }
+
+        // needs_review（MVP: openingPeriod=開業時期 の未登録値のみ）
+        const openingNorm = normalizeValue(openingDateObserved ?? recordData.opening_date)
+        if (openingNorm) {
+          const isKnown = allowedOpeningPeriods.has(openingNorm)
+          if (!isKnown) {
+            const current = openingPeriodUnknowns.get(openingNorm) ?? {
+              observedValue: String(openingDateObserved ?? openingNorm),
+              count: 0,
+              sampleRecordIds: [],
+            }
+            current.count += 1
+            if (leadIdForSample) {
+              current.sampleRecordIds = mergeSampleRecordIds(current.sampleRecordIds, [leadIdForSample], 20)
+            }
+            openingPeriodUnknowns.set(openingNorm, current)
+          }
+        }
         
       } catch (rowError: any) {
         errors.push(`行${rowNum}: ${rowError.message}`)
@@ -508,6 +642,103 @@ export async function POST(request: NextRequest) {
     }
     
     console.log(`[API/spreadsheet] Import completed: ${imported} imported, ${failed} failed`)
+
+    // data_quality_issues へ集約（テーブル未作成ならスキップ）
+    let needsReviewCount = 0
+    if (openingPeriodUnknowns.size > 0) {
+      const unknownEntries: Array<[string, { observedValue: string; count: number; sampleRecordIds: string[] }]> = []
+      openingPeriodUnknowns.forEach((info, normalizedValue) => {
+        needsReviewCount += info.count
+        unknownEntries.push([normalizedValue, info])
+      })
+      try {
+        for (const [normalizedValue, info] of unknownEntries) {
+          // 既存open行を取得（count_total加算・sample_record_idsマージ）
+          const { data: existingIssue, error: issueFetchError } = await supabase
+            .from('data_quality_issues')
+            .select('id,count_total,sample_record_ids')
+            .eq('issue_type', 'unknown_option')
+            .eq('status', 'open')
+            .eq('setting_key', 'openingPeriod')
+            .eq('normalized_value', normalizedValue)
+            .maybeSingle()
+
+          if (issueFetchError) throw issueFetchError
+
+          const commonPayload = {
+            issue_type: 'unknown_option',
+            status: 'open',
+            setting_key: 'openingPeriod',
+            setting_key_label_ja: '開業時期',
+            observed_value: info.observedValue,
+            normalized_value: normalizedValue,
+            source: 'spreadsheet_import',
+            source_ref_id: importRunId,
+            sample_table: 'call_records',
+            sample_column: 'opening_date',
+            last_seen_at: nowIso,
+          }
+
+          if (existingIssue?.id) {
+            const mergedSampleIds = mergeSampleRecordIds(existingIssue.sample_record_ids, info.sampleRecordIds, 20)
+            const newCount = Number(existingIssue.count_total || 0) + info.count
+            const { error: updErr } = await supabase
+              .from('data_quality_issues')
+              .update({
+                ...commonPayload,
+                count_total: newCount,
+                sample_record_ids: mergedSampleIds,
+              })
+              .eq('id', existingIssue.id)
+            if (updErr) throw updErr
+          } else {
+            const { error: insErr } = await supabase
+              .from('data_quality_issues')
+              .insert({
+                ...commonPayload,
+                sample_record_ids: info.sampleRecordIds,
+                count_total: info.count,
+                first_seen_at: nowIso,
+                created_at: nowIso,
+                updated_at: nowIso,
+              })
+            if (insErr) throw insErr
+          }
+        }
+      } catch (e: any) {
+        if (!isMissingTableError(e, 'data_quality_issues')) {
+          console.warn('[API/spreadsheet] Failed to write data_quality_issues:', e?.message)
+        }
+      }
+    }
+
+    // import_runs を完了状態に更新（テーブル未作成ならスキップ）
+    if (importRunId) {
+      try {
+        const status =
+          imported === 0 && failed > 0 ? 'failed' :
+          failed > 0 || needsReviewCount > 0 ? 'partial' :
+          'success'
+
+        const errorMessage = errors.length > 0 ? errors.slice(0, 50).join('\n') : null
+
+        const { error: runUpdErr } = await supabase
+          .from('import_runs')
+          .update({
+            status,
+            finished_at: nowIso,
+            imported_count: imported,
+            needs_review_count: needsReviewCount,
+            error_message: errorMessage,
+          })
+          .eq('id', importRunId)
+        if (runUpdErr) throw runUpdErr
+      } catch (e: any) {
+        if (!isMissingTableError(e, 'import_runs')) {
+          console.warn('[API/spreadsheet] Failed to update import_runs:', e?.message)
+        }
+      }
+    }
     
     return NextResponse.json({
       success: true,
@@ -515,6 +746,22 @@ export async function POST(request: NextRequest) {
       failed,
       total: rows.length,
       errors: errors.slice(0, 50), // 最大50件のエラーを返す
+      importRunId,
+      needsReviewCount,
+      unknownUniqueCount: openingPeriodUnknowns.size,
+      needsReview: openingPeriodUnknowns.size
+        ? {
+            issueType: 'unknown_option',
+            settingKey: 'openingPeriod',
+            settingKeyLabelJa: '開業時期',
+            unknowns: Array.from(openingPeriodUnknowns.entries()).map(([normalized, info]) => ({
+              value: info.observedValue,
+              normalizedValue: normalized,
+              count: info.count,
+              sampleRecordIds: info.sampleRecordIds,
+            })),
+          }
+        : null,
     })
     
   } catch (error: any) {

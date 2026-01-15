@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { CallRecord } from '@/types/sfa'
-import { getDropdownOptions } from '@/lib/dropdownSettings'
+import { getDropdownOptions, refreshDropdownSettingsFromDB } from '@/lib/dropdownSettings'
 
 interface LeadDetailPanelProps {
   record: CallRecord
@@ -24,6 +24,14 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
   useEffect(() => {
     setFormData(record)
   }, [record])
+
+  // DBから設定を取得（初回読み込み時のみ、既存のlocalStorage設定を上書きしない）
+  useEffect(() => {
+    refreshDropdownSettingsFromDB().catch(err => {
+      console.error('Failed to refresh dropdown settings from DB:', err)
+      // エラー時は既存のlocalStorage設定を使用（既存動作を維持）
+    })
+  }, [])
 
   useEffect(() => {
     const handleStorageChange = () => {

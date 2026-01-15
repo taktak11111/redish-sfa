@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { contractSheetsClient, CONTRACT_TEMPLATE_SPREADSHEET_ID } from '@/lib/sheets/contracts'
 import { google } from 'googleapis'
 
+export const dynamic = 'force-dynamic'
+
 // テンプレートシートのセル値を取得（GET）
 export async function GET(request: NextRequest) {
   try {

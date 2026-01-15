@@ -132,8 +132,11 @@ export default function DealsPage() {
         return newOptions
       })
     }
-    // 初回はDBからも取得
-    void refreshDropdownSettingsFromDB().finally(handleStorageChange)
+    // 初回はDBからも取得（既存のlocalStorage設定を上書きしない）
+    void refreshDropdownSettingsFromDB().catch(err => {
+      console.error('Failed to refresh dropdown settings from DB:', err)
+      // エラー時は既存のlocalStorage設定を使用（既存動作を維持）
+    }).finally(handleStorageChange)
     handleStorageChange()
     window.addEventListener('storage', handleStorageChange)
     const interval = window.setInterval(handleStorageChange, 30000)

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { contractSheetsClient, CONTRACT_TEMPLATE_SPREADSHEET_ID, CONTRACT_SHEET_NAMES, CONTRACT_CELL_MAPPING, ContractData } from '@/lib/sheets/contracts'
+import { contractSheetsClient, CONTRACT_TEMPLATE_SPREADSHEET_ID, CONTRACT_SHEET_NAMES, CONTRACT_CELL_MAPPING, ContractData, normalizeGooglePrivateKey } from '@/lib/sheets/contracts'
 import { google } from 'googleapis'
+
+export const runtime = 'nodejs'
 
 // プレビュー用：テンプレートにデータを一時的に書き込み → PDFエクスポート → 元に戻す
 // 注意: 同時実行時の競合リスクがあるため、本番環境では排他制御を検討
@@ -114,10 +116,19 @@ export async function POST(request: NextRequest) {
     }
     
     // 認証クライアントを取得
+    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+    const privateKey = normalizeGooglePrivateKey(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY)
+    if (!clientEmail || !privateKey) {
+      return NextResponse.json(
+        { success: false, error: 'Google認証情報が未設定です（Vercelの環境変数 GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY を確認してください）' },
+        { status: 500 }
+      )
+    }
+
     const auth = new google.auth.GoogleAuth({
       credentials: {
-        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        private_key: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        client_email: clientEmail,
+        private_key: privateKey,
       },
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     })

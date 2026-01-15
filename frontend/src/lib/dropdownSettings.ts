@@ -34,6 +34,14 @@ export interface DropdownSettings {
   rankEstimate: DropdownOption[]
   rankChange: DropdownOption[]
   improvementCategory: DropdownOption[]
+  // 新規追加項目（Phase 1-3）
+  needTemperature: DropdownOption[]
+  contractReason: DropdownOption[]
+  feedbackToIS: DropdownOption[]
+  bantBudget: DropdownOption[]
+  bantAuthority: DropdownOption[]
+  bantTimeline: DropdownOption[]
+  selfHandlingStatus: DropdownOption[]
 }
 
 export const DEFAULT_SETTINGS: DropdownSettings = {
@@ -157,6 +165,7 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: '訪問', label: '訪問' },
   ],
   nextActionContent: [
+    { value: '回答確認', label: '回答確認' },
     { value: '再架電', label: '再架電' },
     { value: 'メール送信', label: 'メール送信' },
     { value: '資料送付', label: '資料送付' },
@@ -172,8 +181,8 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: '担当者Z', label: '担当者Z' },
   ],
   dealResult: [
+    { value: '成約（即決）', label: '成約（即決）' },
     { value: '成約', label: '成約' },
-    { value: '検討中', label: '検討中' },
     { value: '失注', label: '失注' },
   ],
   lostReasonFS: [
@@ -189,13 +198,11 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: 'J.その他', label: 'J.その他' },
   ],
   competitorStatus: [
-    { value: 'A1.他税理士（知り合い）', label: 'A1.他税理士（知り合い）' },
-    { value: 'A2.他税理士（面談あり）', label: 'A2.他税理士（面談あり）' },
-    { value: 'A3.他税理士（価格・サービス）', label: 'A3.他税理士（価格・サービス）' },
-    { value: 'A4.税理士契約済', label: 'A4.税理士契約済' },
-    { value: 'B1.自己対応（やってみる）', label: 'B1.自己対応（やってみる）' },
-    { value: 'B2.商工会議所・青色申告会等', label: 'B2.商工会議所・青色申告会等' },
-    { value: 'C1.他の競合・自己要因', label: 'C1.他の競合・自己要因' },
+    { value: 'なし', label: 'なし' },
+    { value: '他税理士（知り合い）', label: '他税理士（知り合い）' },
+    { value: '他税理士（面談ありサービス）', label: '他税理士（面談ありサービス）' },
+    { value: '他税理士（価格安い）', label: '他税理士（価格安い）' },
+    { value: '他税理士（サービスがいい）', label: '他税理士（サービスがいい）' },
   ],
   bantInfo: [
     { value: 'B1.予算オーバー', label: 'B1.予算オーバー' },
@@ -220,14 +227,13 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: '開業２年目以降', label: '開業２年目以降' },
   ],
   meetingStatus: [
-    { value: '商談キャンセル', label: '商談キャンセル' },
-    { value: 'ノーショー（連絡なし）', label: 'ノーショー（連絡なし）' },
-    { value: '商談実施', label: '商談実施' },
-    { value: '商談再設定', label: '商談再設定' },
+    { value: '実施前', label: '実施前' },
+    { value: '実施済', label: '実施済' },
+    { value: 'ノーショー 連絡なし', label: 'ノーショー 連絡なし' },
+    { value: 'キャンセル', label: 'キャンセル' },
+    { value: 'リスケ', label: 'リスケ' },
   ],
   dealPhase: [
-    { value: '初回商談', label: '初回商談' },
-    { value: '提案中', label: '提案中' },
     { value: '検討中', label: '検討中' },
     { value: '契約準備', label: '契約準備' },
   ],
@@ -252,6 +258,54 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: '架電量', label: '架電量' },
     { value: '架電クオリティ', label: '架電クオリティ' },
     { value: 'その他', label: 'その他' },
+  ],
+  // 新規追加項目（Phase 1-3）
+  needTemperature: [
+    { value: 'A', label: 'A: 期限あり・困り大' },
+    { value: 'B', label: 'B: 条件次第・検討' },
+    { value: 'C', label: 'C: 情報収集・低温' },
+  ],
+  contractReason: [
+    { value: '価格', label: '価格' },
+    { value: 'サービス内容', label: 'サービス内容' },
+    { value: '価格・サービス両方', label: '価格・サービス両方' },
+    { value: 'その他', label: 'その他' },
+  ],
+  feedbackToIS: [
+    { value: 'ニーズ全くなし', label: 'ニーズ全くなし' },
+    { value: '自己資金なし', label: '自己資金なし' },
+    { value: '日本語問題', label: '日本語問題' },
+    { value: '興味本位（少しのニーズ）', label: '興味本位（少しのニーズ）' },
+    { value: '開業時期1年以上先', label: '開業時期1年以上先' },
+    { value: 'その他', label: 'その他' },
+  ],
+  bantBudget: [
+    { value: '予算オーバー', label: '予算オーバー' },
+    { value: '予算内', label: '予算内' },
+    { value: '確認中', label: '確認中' },
+    { value: '検討中', label: '検討中' },
+    { value: '不明', label: '不明' },
+  ],
+  bantAuthority: [
+    { value: '単独決裁者', label: '単独決裁者' },
+    { value: '共同決裁', label: '共同決裁' },
+    { value: '決裁権限なし', label: '決裁権限なし' },
+    { value: '不明', label: '不明' },
+  ],
+  bantTimeline: [
+    { value: '即時', label: '即時' },
+    { value: '3日以内', label: '3日以内' },
+    { value: '1週間以内', label: '1週間以内' },
+    { value: '1ヶ月以内', label: '1ヶ月以内' },
+    { value: '3ヶ月以内', label: '3ヶ月以内' },
+    { value: '3ヶ月以上', label: '3ヶ月以上' },
+    { value: '未定', label: '未定' },
+  ],
+  selfHandlingStatus: [
+    { value: 'なし', label: 'なし' },
+    { value: 'やってみる', label: 'やってみる' },
+    { value: '商工会議所・青色申告会等サポート', label: '商工会議所・青色申告会等サポート' },
+    { value: '自己対応検討', label: '自己対応検討' },
   ],
 }
 
@@ -350,6 +404,11 @@ export function getDropdownOptions(field: keyof DropdownSettings): DropdownOptio
  * DB（/api/dropdown-settings）から設定を取得し、localStorageへ同期する。
  * - settingsページを開かなくても最新設定を反映するために使用する
  * - 失敗時は localStorage / DEFAULT_SETTINGS を返す
+ * 
+ * 注意: カテゴリ名の不一致について
+ * - 設定メニューのセクションID（'dealManagement'）とDBのカテゴリ名（'deal'）が不一致
+ * - この不一致は既存のDBデータとの互換性のため維持されている
+ * - DBから取得した設定は、カテゴリに関係なく`DropdownSettings`型にマージされる
  */
 export async function refreshDropdownSettingsFromDB(): Promise<DropdownSettings> {
   if (typeof window === 'undefined') {
@@ -380,10 +439,19 @@ export async function refreshDropdownSettingsFromDB(): Promise<DropdownSettings>
 
     const mergedSettings: DropdownSettings = { ...DEFAULT_SETTINGS }
 
+    // DBから取得した設定をカテゴリ別にマージ
+    // 注意: カテゴリ名（'call', 'deal'など）に関係なく、設定キーでマージされる
+    // 例: 'deal'カテゴリの'staffIS'も、'call'カテゴリの'staffIS'も、同じ'staffIS'キーにマージされる
     Object.keys(dbSettings).forEach(category => {
       Object.keys(dbSettings[category] || {}).forEach(key => {
         if (key in mergedSettings) {
           mergedSettings[key as keyof DropdownSettings] = dbSettings[category][key]
+        } else {
+          // 型定義に存在しないキーは警告を出すが、無視する（既存動作を維持）
+          // 削除済みフィールド（nextActionSupplement, nextActionCompleted）は警告を出さない
+          if (key !== 'nextActionSupplement' && key !== 'nextActionCompleted') {
+            console.warn(`[dropdownSettings] Key "${key}" in category "${category}" not found in DropdownSettings type`)
+          }
         }
       })
     })

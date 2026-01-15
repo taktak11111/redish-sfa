@@ -215,8 +215,17 @@ export default function SettingsPage() {
   const [isLoadingHeaders, setIsLoadingHeaders] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [importingConfigId, setImportingConfigId] = useState<string | null>(null) // 取得中の設定ID
-  const [importResult, setImportResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null)
-  const [lastImportResults, setLastImportResults] = useState<Record<string, { success: number; failed: number; time: string }>>({}) // 各設定の最終取得結果
+  const [importResult, setImportResult] = useState<{
+    success: number
+    failed: number
+    errors: string[]
+    importRunId?: string | null
+    needsReviewCount?: number
+    unknownUniqueCount?: number
+    needsReview?: any
+  } | null>(null)
+  const [lastImportResults, setLastImportResults] = useState<Record<string, { success: number; failed: number; time: string; needsReviewCount?: number; unknownUniqueCount?: number; importRunId?: string | null }>>({}) // 各設定の最終取得結果
+  const [lastImportNeedsReviewDetails, setLastImportNeedsReviewDetails] = useState<Record<string, any>>({})
   
   // ファイルアップロード用のstate
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
@@ -264,6 +273,19 @@ export default function SettingsPage() {
   const [editingUserRole, setEditingUserRole] = useState<'admin' | 'manager' | 'staff'>('staff')
   const [showAddUserModal, setShowAddUserModal] = useState(false)
   const [newUser, setNewUser] = useState({ email: '', full_name: '', role: 'staff' as 'admin' | 'manager' | 'staff', department: '' })
+  
+  // 互換セクション（折りたたみ）状態
+  const [compatSectionOpen, setCompatSectionOpen] = useState<Record<string, boolean>>({
+    call: false,
+    dealManagement: false,
+  })
+  
+  // ヘルスチェック（要確認一覧）
+  const [healthStatusFilter, setHealthStatusFilter] = useState<'open' | 'resolved' | 'ignored'>('open')
+  const [healthIssues, setHealthIssues] = useState<any[]>([])
+  const [isLoadingHealthIssues, setIsLoadingHealthIssues] = useState(false)
+  const [isRunningHealthScan, setIsRunningHealthScan] = useState(false)
+  const [healthTableMissing, setHealthTableMissing] = useState(false)
   
   // 連携データ表示用のstate
   const [importedRecords, setImportedRecords] = useState<any[]>([])
@@ -646,6 +668,122 @@ export default function SettingsPage() {
     setIsEditing(true)
   }
 
+  // SSOT辞書（最小：設定画面で使うキーのみ）
+  const SETTING_LABELS_JA: Record<string, string> = {
+    // call
+    staffIS: '担当IS',
+    statusIS: 'リードステータス（IS）',
+    customerType: '顧客区分（属性）',
+    resultContactStatus: '直近架電結果（未架電/不通/通電）',
+    cannotContactReason: '対象外/連絡不能 理由（互換）',
+    disqualifyReason: '対象外（Disqualified）理由',
+    unreachableReason: '連絡不能（Unreachable）理由',
+    lostReasonPrimary: '失注主因（顧客/自社/競合/自己対応/その他）',
+    lostReasonCustomerSub: '失注サブ理由（顧客要因）',
+    lostReasonCompanySub: '失注サブ理由（自社要因）',
+    lostReasonCompetitorSub: '失注サブ理由（競合要因）',
+    lostReasonSelfSub: '失注サブ理由（自己対応）',
+    lostReasonOtherSub: '失注サブ理由（その他）',
+    lostReasonMemoTemplates: '（旧）備忘テンプレ（互換）',
+    recyclePriority: 'ナーチャリング優先度',
+    actionOutsideCall: '架電外アクション',
+    nextActionContent: 'ネクストアクション内容',
+    improvementCategory: '改善・学習カテゴリ',
+    needTemperature: 'ニーズ温度（IS判定）',
+    // deal
+    dealStaffFS: '商談担当FS',
+    contractStaff: '契約担当者',
+    meetingStatus: '商談実施状況',
+    dealResult: '商談結果',
+    lostReasonFS: '失注理由（FS→IS）',
+    contractReason: '成約要因',
+    feedbackToIS: 'ISへのフィードバック',
+    bantBudget: 'BANT（予算）',
+    bantAuthority: 'BANT（決裁権）',
+    bantTimeline: 'BANT（導入時期）',
+    competitorStatus: '競合状況',
+    selfHandlingStatus: '自己対応状況',
+    bantInfo: 'BANT（旧・互換）',
+    openingPeriod: '開業時期',
+    dealPhase: '商談フェーズ',
+    rankEstimate: '確度ヨミ',
+    rankChange: '確度変化',
+  }
+
+  const COMPAT_KEYS_ALWAYS: Array<keyof DropdownSettings> = [
+    'cannotContactReason',
+    'lostReasonMemoTemplates',
+    'bantInfo',
+  ]
+
+  const COMPAT_OPTION_FIELDS: Array<keyof DropdownSettings> = [
+    'statusIS',
+    'recyclePriority',
+    'resultContactStatus',
+  ]
+
+  const isLegacyOption = (opt: DropdownOption) => {
+    const s = `${opt?.value ?? ''} ${opt?.label ?? ''}`
+    return s.includes('（旧）') || s.includes('(旧)') || s.includes('旧)')
+  }
+
+  const splitOptions = (field: keyof DropdownSettings, options: DropdownOption[]) => {
+    if (COMPAT_KEYS_ALWAYS.includes(field)) {
+      return { normal: [] as DropdownOption[], compat: options || [] }
+    }
+    if (COMPAT_OPTION_FIELDS.includes(field)) {
+      const normal = (options || []).filter((o) => !isLegacyOption(o))
+      const compat = (options || []).filter((o) => isLegacyOption(o))
+      return { normal, compat }
+    }
+    return { normal: options || [], compat: [] as DropdownOption[] }
+  }
+
+  const getKeyLabel = (key: string, fallbackJa?: string) => {
+    const ja = SETTING_LABELS_JA[key] || fallbackJa || key
+    return `${key}（${ja}）`
+  }
+
+  const fetchHealthIssues = async () => {
+    setIsLoadingHealthIssues(true)
+    try {
+      const params = new URLSearchParams()
+      params.set('status', healthStatusFilter)
+      params.set('limit', '200')
+      const res = await fetch(`/api/data-quality/issues?${params.toString()}`)
+      const data = await res.json()
+      if (!res.ok) {
+        console.error('[HealthCheck] Failed to load issues:', data)
+        return
+      }
+      setHealthIssues(data.issues || [])
+      setHealthTableMissing(Boolean(data.tableMissing))
+    } catch (e) {
+      console.error('[HealthCheck] Failed to load issues:', e)
+    } finally {
+      setIsLoadingHealthIssues(false)
+    }
+  }
+
+  const runHealthScan = async () => {
+    setIsRunningHealthScan(true)
+    try {
+      const res = await fetch('/api/data-quality/scan', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        console.error('[HealthCheck] Scan failed:', data)
+        alert(data.error || 'ヘルスチェックの実行に失敗しました')
+        return
+      }
+      await fetchHealthIssues()
+    } catch (e) {
+      console.error('[HealthCheck] Scan failed:', e)
+      alert('ヘルスチェックの実行に失敗しました')
+    } finally {
+      setIsRunningHealthScan(false)
+    }
+  }
+
   const handleSave = async () => {
     if (!settings) return
     
@@ -670,6 +808,10 @@ export default function SettingsPage() {
         })
         
         if (Object.keys(categorySettings).length > 0) {
+          // カテゴリマッピング: 設定メニューのセクションID → DBカテゴリ名
+          // 注意: 既存のDBデータとの互換性のため、このマッピングを維持
+          // - 'call': 架電管理 - セクションIDとDBカテゴリが一致
+          // - 'dealManagement': 商談管理 - セクションIDは'dealManagement'だが、DBカテゴリは'deal'
           const categoryMap: Record<string, string> = {
             'call': 'call',
             'dealManagement': 'deal',
@@ -1228,6 +1370,7 @@ export default function SettingsPage() {
           headerRow: configToUse.headerRow || 1,
           columnMappings: configToUse.columnMappings.filter(m => m.targetField),
           leadSourcePrefix: configToUse.leadSourcePrefix,
+          spreadsheetConfigId: configToUse.id,
         }),
       })
       
@@ -1249,11 +1392,18 @@ export default function SettingsPage() {
       
       const importedCount = result.imported || 0
       const failedCount = result.failed || 0
+      const needsReviewCount = result.needsReviewCount || 0
+      const unknownUniqueCount = result.unknownUniqueCount || 0
+      const importRunId = result.importRunId || null
       
       setImportResult({
         success: importedCount,
         failed: failedCount,
         errors: result.errors || [],
+        needsReviewCount,
+        unknownUniqueCount,
+        importRunId,
+        needsReview: result.needsReview || null,
       })
       
       // 各設定の取得結果を保存
@@ -1263,8 +1413,18 @@ export default function SettingsPage() {
           success: importedCount,
           failed: failedCount,
           time: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+          needsReviewCount,
+          unknownUniqueCount,
+          importRunId,
         }
       }))
+
+      if (result.needsReview) {
+        setLastImportNeedsReviewDetails(prev => ({
+          ...prev,
+          [configToUse.id]: result.needsReview,
+        }))
+      }
       
       // 最終インポート日時を更新（データベースにも保存）
       const lastImportedAt = new Date().toISOString()
@@ -1327,6 +1487,14 @@ export default function SettingsPage() {
     }
   }
 
+  // ヘルスチェックタブが選択されたときに一覧を取得
+  useEffect(() => {
+    if (activeSection === 'healthCheck') {
+      fetchHealthIssues()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, healthStatusFilter])
+
   const sections = [
     {
       id: 'call',
@@ -1353,6 +1521,7 @@ export default function SettingsPage() {
         { key: 'actionOutsideCall', label: '架電外アクション' },
         { key: 'nextActionContent', label: 'ネクストアクション内容' },
         { key: 'improvementCategory', label: '改善・学習カテゴリ' },
+        { key: 'needTemperature', label: 'ニーズ温度（IS判定）' },
       ],
     },
     {
@@ -1364,14 +1533,26 @@ export default function SettingsPage() {
         { key: 'meetingStatus', label: '商談実施状況' },
         { key: 'dealResult', label: '商談結果' },
         { key: 'lostReasonFS', label: '失注理由（FS→IS）' },
-        { key: 'competitorStatus', label: '競合・自己対応状況' },
-        { key: 'bantInfo', label: 'BANT情報' },
+        { key: 'contractReason', label: '成約要因' },
+        { key: 'feedbackToIS', label: 'ISへのフィードバック' },
+        { type: 'divider', label: 'BANT情報' },
+        { key: 'bantBudget', label: 'BANT情報（B:予算）' },
+        { key: 'bantAuthority', label: 'BANT情報（A:決裁権）' },
+        { key: 'bantTimeline', label: 'BANT情報（T:導入時期）' },
+        { key: 'competitorStatus', label: '競合状況' },
+        { key: 'selfHandlingStatus', label: '自己対応状況' },
+        { key: 'bantInfo', label: 'BANT情報（旧）' },
         { key: 'openingPeriod', label: '開業時期' },
         { type: 'divider', label: 'フェーズ・確度' },
         { key: 'dealPhase', label: '商談フェーズ' },
         { key: 'rankEstimate', label: '確度ヨミ' },
         { key: 'rankChange', label: '確度変化' },
       ],
+    },
+    {
+      id: 'healthCheck',
+      title: 'ヘルスチェック',
+      fields: [],
     },
     {
       id: 'spreadsheet',
@@ -1395,6 +1576,8 @@ export default function SettingsPage() {
             <p className="mt-1 text-sm text-gray-500">
               {activeSection === 'spreadsheet' 
                 ? 'アライアンス先スプレッドシートからのデータ取り込み設定'
+                : activeSection === 'healthCheck'
+                ? '未登録値（needs_review）を検知・回収するヘルスチェック'
                 : activeSection === 'users'
                 ? 'ユーザー権限を管理します（管理者のみ）'
                 : 'ドロップダウンの選択項目を管理します'
@@ -1402,7 +1585,7 @@ export default function SettingsPage() {
             </p>
           </div>
           {/* アクションボタン（ドロップダウン設定用） */}
-          {activeSection !== 'spreadsheet' && (
+          {(activeSection === 'call' || activeSection === 'dealManagement') && (
             <div className="flex gap-3">
               {isEditing ? (
                 <>
@@ -1459,10 +1642,15 @@ export default function SettingsPage() {
         <div className="card">
           <div className="p-6">
             {/* ドロップダウン設定セクション */}
-            {sections.filter(s => s.id !== 'spreadsheet' && s.id !== 'users').map((section) => (
+            {sections.filter(s => s.id === 'call' || s.id === 'dealManagement').map((section) => (
               <div key={section.id} className={activeSection === section.id ? '' : 'hidden'}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {section.fields.map((field, fieldIndex) => {
+                  {section.fields
+                    .filter((f: any) => {
+                      if (!('key' in f) || !f.key) return true
+                      return !COMPAT_KEYS_ALWAYS.includes(f.key as keyof DropdownSettings)
+                    })
+                    .map((field, fieldIndex) => {
                     const fieldKey = 'type' in field && field.type === 'divider' 
                       ? `divider-${section.id}-${fieldIndex}`
                       : ('key' in field && field.key ? `${section.id}-${field.key}` : `${section.id}-field-${fieldIndex}`)
@@ -1476,9 +1664,11 @@ export default function SettingsPage() {
                     ) : (
                     <React.Fragment key={fieldKey}>
                       <div className="border border-gray-200 rounded-lg p-4">
-                        <h3 className="text-sm font-semibold text-gray-900 mb-4">{field.label}</h3>
+                        <h3 className="text-sm font-semibold text-gray-900 mb-4">
+                          {'key' in field && field.key ? getKeyLabel(field.key, field.label) : field.label}
+                        </h3>
                         <div className="space-y-2">
-                          {('key' in field && field.key && settings) ? ((settings[field.key as keyof DropdownSettings] || []).map((option, index) => {
+                          {('key' in field && field.key && settings) ? (splitOptions(field.key as keyof DropdownSettings, settings[field.key as keyof DropdownSettings] || []).normal.map((option, index) => {
                             const settingFieldKey = field.key as keyof DropdownSettings
                             const isDragging = draggedIndex?.field === settingFieldKey && draggedIndex?.index === index
                             const isDragOver = dragOverIndex?.field === settingFieldKey && dragOverIndex?.index === index
@@ -1681,9 +1871,170 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* 互換セクション（折りたたみ・閲覧のみ） */}
+                  <div className="col-span-1 md:col-span-2 border border-amber-200 rounded-lg bg-amber-50">
+                    <button
+                      onClick={() => {
+                        setCompatSectionOpen((prev) => ({
+                          ...prev,
+                          [section.id]: !prev[section.id],
+                        }))
+                      }}
+                      className="w-full flex items-center justify-between px-4 py-3"
+                      title="互換セクションを開閉"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-amber-900">互換（旧データ表示用・原則編集禁止）</span>
+                        <span className="text-xs text-amber-700">（デフォルト折りたたみ）</span>
+                      </div>
+                      <span className="text-amber-800 text-sm">{compatSectionOpen[section.id] ? '▲' : '▼'}</span>
+                    </button>
+
+                    {compatSectionOpen[section.id] && (
+                      <div className="px-4 pb-4">
+                        <div className="text-xs text-amber-800 mb-3">
+                          過去データ表示のための互換枠です。MVPでは<strong>閲覧のみ</strong>（編集導線なし）です。
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {(() => {
+                            const compatFields: Array<{ key: keyof DropdownSettings; label: string }> = []
+
+                            // 常に互換に隔離するキー
+                            for (const k of COMPAT_KEYS_ALWAYS) {
+                              if ((section.id === 'call' && (k === 'cannotContactReason' || k === 'lostReasonMemoTemplates')) || (section.id === 'dealManagement' && k === 'bantInfo')) {
+                                compatFields.push({ key: k, label: getKeyLabel(String(k), SETTING_LABELS_JA[String(k)]) })
+                              }
+                            }
+
+                            // (旧)選択肢を隔離するキー
+                            for (const k of COMPAT_OPTION_FIELDS) {
+                              if (section.id !== 'call') continue
+                              const { compat } = splitOptions(k, settings?.[k] || [])
+                              if (compat.length > 0) {
+                                compatFields.push({ key: k, label: `${getKeyLabel(String(k), SETTING_LABELS_JA[String(k)])}（互換）` })
+                              }
+                            }
+
+                            if (compatFields.length === 0) {
+                              return <div className="text-sm text-gray-600">互換項目はありません</div>
+                            }
+
+                            return compatFields.map((f) => {
+                              const { compat } = splitOptions(f.key, settings?.[f.key] || [])
+                              return (
+                                <div key={`compat-${section.id}-${String(f.key)}`} className="border border-amber-200 rounded bg-white p-3">
+                                  <div className="text-sm font-semibold text-gray-900 mb-2">{f.label}</div>
+                                  <div className="space-y-1">
+                                    {compat.length === 0 ? (
+                                      <div className="text-sm text-gray-500">互換値なし</div>
+                                    ) : (
+                                      compat.map((opt, idx) => (
+                                        <div key={idx} className="px-3 py-2 text-sm bg-gray-50 rounded border border-gray-200 text-gray-700">
+                                          {opt.label}
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
+
+            {/* ヘルスチェック */}
+            {activeSection === 'healthCheck' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">ヘルスチェック（未登録値の要確認）</h2>
+                    <p className="text-xs text-gray-500 mt-1">
+                      DB内の実値と許容値（ドロップダウン設定）を突合し、未登録値を集約表示します（MVP）
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={healthStatusFilter}
+                      onChange={(e) => setHealthStatusFilter(e.target.value as any)}
+                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                      title="ステータス"
+                    >
+                      <option value="open">open</option>
+                      <option value="resolved">resolved</option>
+                      <option value="ignored">ignored</option>
+                    </select>
+                    <button
+                      onClick={fetchHealthIssues}
+                      disabled={isLoadingHealthIssues}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {isLoadingHealthIssues ? '読み込み中...' : '更新'}
+                    </button>
+                    <button
+                      onClick={runHealthScan}
+                      disabled={isRunningHealthScan}
+                      className="px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 rounded-lg hover:bg-amber-200 disabled:opacity-70"
+                      title="DBをスキャンして要確認を更新します"
+                    >
+                      {isRunningHealthScan ? 'スキャン中...' : 'スキャン実行'}
+                    </button>
+                  </div>
+                </div>
+
+                {healthTableMissing && (
+                  <div className="border border-amber-200 bg-amber-50 rounded-lg p-4 text-sm text-amber-900">
+                    要確認テーブルが未作成の可能性があります（`data_quality_issues`）。Supabaseマイグレーションを適用してください。
+                  </div>
+                )}
+
+                {isLoadingHealthIssues ? (
+                  <div className="flex justify-center py-10">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  </div>
+                ) : healthIssues.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <p className="text-sm">要確認はありません</p>
+                    <p className="text-xs mt-2">「スキャン実行」で再チェックできます</p>
+                  </div>
+                ) : (
+                  <div className="overflow-auto border border-gray-200 rounded-lg">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">設定キー</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">未登録値</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">件数</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最終観測</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {healthIssues.map((issue) => (
+                          <tr key={issue.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                              {issue.setting_key_label_ja
+                                ? `${issue.setting_key}（${issue.setting_key_label_ja}）`
+                                : getKeyLabel(issue.setting_key, issue.setting_key)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-700">
+                              <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{issue.observed_value}</span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-700 text-right">{issue.count_total}</td>
+                            <td className="px-4 py-3 text-xs text-gray-500">{issue.last_seen_at ? new Date(issue.last_seen_at).toLocaleString('ja-JP') : '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
             
             {/* ユーザー権限設定セクション */}
             <div className={activeSection === 'users' ? '' : 'hidden'}>
@@ -2407,6 +2758,70 @@ export default function SettingsPage() {
               {/* 連携リストサブタブ */}
               {spreadsheetSubTab === 'list' && (
               <div className="space-y-6">
+                {/* 取り込み結果（needs_review表示） */}
+                {importResult && (
+                  <div className="border border-gray-200 rounded-lg p-4 bg-white">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">直近の取り込み結果</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          importRunId: <span className="font-mono">{importResult.importRunId || '-'}</span>
+                        </div>
+                      </div>
+                      {(importResult.needsReviewCount || 0) > 0 && (
+                        <button
+                          onClick={() => setActiveSection('healthCheck')}
+                          className="px-3 py-2 text-sm font-medium text-amber-900 bg-amber-100 rounded-lg hover:bg-amber-200"
+                          title="ヘルスチェックへ移動"
+                        >
+                          設定のヘルスチェックへ移動
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                      <div className="border border-gray-200 rounded p-3">
+                        <div className="text-xs text-gray-500">成功</div>
+                        <div className="text-lg font-bold text-green-700">{importResult.success}</div>
+                      </div>
+                      <div className="border border-gray-200 rounded p-3">
+                        <div className="text-xs text-gray-500">失敗/スキップ</div>
+                        <div className="text-lg font-bold text-gray-700">{importResult.failed}</div>
+                      </div>
+                      <div className="border border-amber-200 rounded p-3 bg-amber-50">
+                        <div className="text-xs text-amber-800">needs_review（要確認）</div>
+                        <div className="text-lg font-bold text-amber-900">{importResult.needsReviewCount || 0}</div>
+                        <div className="text-xs text-amber-800">未登録値（ユニーク）: {importResult.unknownUniqueCount || 0}</div>
+                      </div>
+                    </div>
+
+                    {importResult.needsReview?.unknowns?.length > 0 && (
+                      <div className="mt-4">
+                        <div className="text-sm font-semibold text-gray-900 mb-2">要確認一覧（未登録値）</div>
+                        <div className="text-xs text-gray-500 mb-2">
+                          {importResult.needsReview.settingKey
+                            ? `${importResult.needsReview.settingKey}（${importResult.needsReview.settingKeyLabelJa || ''}）`
+                            : ''}
+                        </div>
+                        <div className="space-y-2">
+                          {importResult.needsReview.unknowns.map((u: any, idx: number) => (
+                            <div key={idx} className="border border-amber-200 rounded bg-amber-50 p-3 text-sm">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="font-mono text-xs bg-white px-2 py-1 rounded border border-amber-200">{u.value}</div>
+                                <div className="text-amber-900 font-semibold">{u.count}件</div>
+                              </div>
+                              {Array.isArray(u.sampleRecordIds) && u.sampleRecordIds.length > 0 && (
+                                <div className="text-xs text-amber-800 mt-2">
+                                  例（lead_id）: {u.sampleRecordIds.slice(0, 5).join(', ')}{u.sampleRecordIds.length > 5 ? '…' : ''}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {/* テーブル未作成警告 */}
                 {isTableMissing && (
                   <div className="border border-yellow-300 rounded-lg p-4 bg-yellow-50">
@@ -2657,6 +3072,11 @@ export default function SettingsPage() {
                                     {lastImportResults[config.id].failed > 0 && (
                                       <span className="text-gray-500">
                                         ({lastImportResults[config.id].failed}件スキップ)
+                                      </span>
+                                    )}
+                                    {(lastImportResults[config.id].needsReviewCount || 0) > 0 && (
+                                      <span className="text-amber-700 font-medium">
+                                        要確認 {lastImportResults[config.id].needsReviewCount}件
                                       </span>
                                     )}
                                     <span className="text-gray-400">

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { CallRecord, CallStatus, CallHistory, CallHistoryStatus } from '@/types/sfa'
-import { getDropdownOptions } from '@/lib/dropdownSettings'
+import { getDropdownOptions, refreshDropdownSettingsFromDB } from '@/lib/dropdownSettings'
 import { CallHistoryModal } from './CallHistoryModal'
 
 function getLocalDateString(date: Date = new Date()): string {
@@ -88,6 +88,7 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
     lostReasonFS: getDropdownOptions('lostReasonFS'),
     openingPeriod: getDropdownOptions('openingPeriod'),
     improvementCategory: getDropdownOptions('improvementCategory'),
+    needTemperature: getDropdownOptions('needTemperature'),
   })
 
   useEffect(() => {
@@ -109,6 +110,14 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
     // 行クリックで詳細を開いた時は、基本情報はデフォルトで閉じる
     setExpandedSections(prev => ({ ...prev, basic: false }))
   }, [record])
+
+  // DBから設定を取得（初回読み込み時のみ、既存のlocalStorage設定を上書きしない）
+  useEffect(() => {
+    refreshDropdownSettingsFromDB().catch(err => {
+      console.error('Failed to refresh dropdown settings from DB:', err)
+      // エラー時は既存のlocalStorage設定を使用（既存動作を維持）
+    })
+  }, [])
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -135,6 +144,7 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
         lostReasonFS: getDropdownOptions('lostReasonFS'),
         openingPeriod: getDropdownOptions('openingPeriod'),
         improvementCategory: getDropdownOptions('improvementCategory'),
+        needTemperature: getDropdownOptions('needTemperature'),
       })
     }
     
@@ -1151,12 +1161,13 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
                         value={formData.needTemperature || ''}
                         onChange={(e) => handleChange('needTemperature', e.target.value)}
                         className="input"
-                        title="A: 期限あり・困り大 / B: 条件次第・検討 / C: 情報収集・低温"
                       >
                         <option value="">選択してください</option>
-                        <option value="A" title="期限あり・困り大">A: 期限あり・困り大</option>
-                        <option value="B" title="条件次第・検討">B: 条件次第・検討</option>
-                        <option value="C" title="情報収集・低温">C: 情報収集・低温</option>
+                        {dropdownSettings.needTemperature.map(option => (
+                          <option key={option.value} value={option.value} title={option.label}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>

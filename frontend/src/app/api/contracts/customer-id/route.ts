@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { google } from 'googleapis'
 
+export const dynamic = 'force-dynamic'
+
 // 顧客IDスプレッドシートの設定
 const SPREADSHEET_ID = '15JYERiJcs7k3IxYwmRGTMM-8o_6Tz8t9BW6P6c-91aY'
 const SHEET_NAME = '顧客ID'

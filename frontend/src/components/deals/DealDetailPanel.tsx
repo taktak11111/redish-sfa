@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Deal, DealRank, DealResult } from '@/types/sfa'
-import { getDropdownOptions } from '@/lib/dropdownSettings'
+import { getDropdownOptions, refreshDropdownSettingsFromDB } from '@/lib/dropdownSettings'
 
 const RANK_OPTIONS: { value: DealRank; label: string }[] = [
   { value: 'A:80%', label: 'A:80%' },
@@ -61,6 +61,16 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
     dealPhase: getDropdownOptions('dealPhase'),
     rankEstimate: getDropdownOptions('rankEstimate'),
     rankChange: getDropdownOptions('rankChange'),
+    meetingStatus: getDropdownOptions('meetingStatus'),
+    needTemperature: getDropdownOptions('needTemperature'),
+    contractReason: getDropdownOptions('contractReason'),
+    feedbackToIS: getDropdownOptions('feedbackToIS'),
+    bantBudget: getDropdownOptions('bantBudget'),
+    bantAuthority: getDropdownOptions('bantAuthority'),
+    bantTimeline: getDropdownOptions('bantTimeline'),
+    competitorStatus: getDropdownOptions('competitorStatus'),
+    selfHandlingStatus: getDropdownOptions('selfHandlingStatus'),
+    nextActionContent: getDropdownOptions('nextActionContent'),
   })
 
   useEffect(() => {
@@ -74,6 +84,14 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
     setIsEditingLeft(false)
     setIsSaved(false)
   }, [deal])
+
+  // DBから設定を取得（初回読み込み時のみ、既存のlocalStorage設定を上書きしない）
+  useEffect(() => {
+    refreshDropdownSettingsFromDB().catch(err => {
+      console.error('Failed to refresh dropdown settings from DB:', err)
+      // エラー時は既存のlocalStorage設定を使用（既存動作を維持）
+    })
+  }, [])
 
   // 商談時間のリアルタイム計測
   useEffect(() => {
@@ -113,6 +131,16 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
         dealPhase: getDropdownOptions('dealPhase'),
         rankEstimate: getDropdownOptions('rankEstimate'),
         rankChange: getDropdownOptions('rankChange'),
+        meetingStatus: getDropdownOptions('meetingStatus'),
+        needTemperature: getDropdownOptions('needTemperature'),
+        contractReason: getDropdownOptions('contractReason'),
+        feedbackToIS: getDropdownOptions('feedbackToIS'),
+        bantBudget: getDropdownOptions('bantBudget'),
+        bantAuthority: getDropdownOptions('bantAuthority'),
+        bantTimeline: getDropdownOptions('bantTimeline'),
+        competitorStatus: getDropdownOptions('competitorStatus'),
+        selfHandlingStatus: getDropdownOptions('selfHandlingStatus'),
+        nextActionContent: getDropdownOptions('nextActionContent'),
       })
     }
     
@@ -694,9 +722,11 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                         }
                       }} className="input text-sm py-1.5">
                         <option value="">選択</option>
-                        <option value="成約（即決）">成約（即決）</option>
-                        <option value="成約">成約</option>
-                        <option value="失注">失注</option>
+                        {dropdownSettings.dealResult.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div>
@@ -712,10 +742,11 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                       <label className="label text-xs">成約要因</label>
                       <select value={formData.contractReason || ''} onChange={(e) => handleChange('contractReason', e.target.value)} className="input text-sm py-1.5">
                         <option value="">選択</option>
-                        <option value="価格">価格</option>
-                        <option value="サービス内容">サービス内容</option>
-                        <option value="価格・サービス両方">価格・サービス両方</option>
-                        <option value="その他">その他</option>
+                        {dropdownSettings.contractReason.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div>
@@ -753,12 +784,11 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                       <label className="label text-xs">ISへのフィードバック</label>
                       <select value={formData.feedbackToIS || ''} onChange={(e) => handleChange('feedbackToIS', e.target.value)} className="input text-sm py-1.5">
                         <option value="">選択</option>
-                        <option value="ニーズ全くなし">ニーズ全くなし</option>
-                        <option value="自己資金なし">自己資金なし</option>
-                        <option value="日本語問題">日本語問題</option>
-                        <option value="興味本位（少しのニーズ）">興味本位（少しのニーズ）</option>
-                        <option value="開業時期1年以上先">開業時期1年以上先</option>
-                        <option value="その他">その他</option>
+                        {dropdownSettings.feedbackToIS.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div>
@@ -797,8 +827,11 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                             handleChange('rankEstimate1', 'A80%')
                           }
                         }} className="input text-sm py-1.5">
-                          <option value="検討中">検討中</option>
-                          <option value="契約準備">契約準備</option>
+                          {dropdownSettings.dealPhase.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
@@ -844,8 +877,11 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                             handleChange('rankEstimate2', 'A80%')
                           }
                         }} className="input text-sm py-1.5">
-                          <option value="検討中">検討中</option>
-                          <option value="契約準備">契約準備</option>
+                          {dropdownSettings.dealPhase.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
@@ -892,8 +928,11 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                             handleChange('rankEstimate3', 'A80%')
                           }
                         }} className="input text-sm py-1.5">
-                          <option value="検討中">検討中</option>
-                          <option value="契約準備">契約準備</option>
+                          {dropdownSettings.dealPhase.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
@@ -1010,11 +1049,11 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                     <div>
                       <label className="label text-xs">商談実施状況</label>
                       <select value={formData.dealExecutionStatus || '実施前'} onChange={(e) => handleChange('dealExecutionStatus', e.target.value)} className="input text-sm py-1.5">
-                        <option value="実施前">実施前</option>
-                        <option value="実施済">実施済</option>
-                        <option value="ノーショー 連絡なし">ノーショー 連絡なし</option>
-                        <option value="キャンセル">キャンセル</option>
-                        <option value="リスケ">リスケ</option>
+                        {dropdownSettings.meetingStatus.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div>
@@ -1059,21 +1098,22 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                         <label className="label text-xs">B:予算</label>
                         <select value={formData.bantBudget || ''} onChange={(e) => handleChange('bantBudget', e.target.value)} className="input text-sm py-1.5">
                           <option value="">選択</option>
-                          <option value="予算オーバー">予算オーバー</option>
-                          <option value="予算内">予算内</option>
-                          <option value="確認中">確認中</option>
-                          <option value="検討中">検討中</option>
-                          <option value="不明">不明</option>
+                          {dropdownSettings.bantBudget.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
                         <label className="label text-xs">A:決裁権</label>
                         <select value={formData.bantAuthority || ''} onChange={(e) => handleChange('bantAuthority', e.target.value)} className="input text-sm py-1.5">
                           <option value="">選択</option>
-                          <option value="単独決裁者">単独決裁者</option>
-                          <option value="共同決裁">共同決裁</option>
-                          <option value="決裁権限なし">決裁権限なし</option>
-                          <option value="不明">不明</option>
+                          {dropdownSettings.bantAuthority.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
@@ -1089,22 +1129,22 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                           }
                         >
                           <option value="">選択</option>
-                          <option value="A">A: 期限あり・困り大</option>
-                          <option value="B">B: 条件次第・検討</option>
-                          <option value="C">C: 情報収集・低温</option>
+                          {dropdownSettings.needTemperature.map(option => (
+                            <option key={option.value} value={option.value} title={option.label}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
                         <label className="label text-xs">T:導入時期</label>
                         <select value={formData.bantTimeline || ''} onChange={(e) => handleChange('bantTimeline', e.target.value)} className="input text-sm py-1.5">
                           <option value="">選択</option>
-                          <option value="即時">即時</option>
-                          <option value="3日以内">3日以内</option>
-                          <option value="1週間以内">1週間以内</option>
-                          <option value="1ヶ月以内">1ヶ月以内</option>
-                          <option value="3ヶ月以内">3ヶ月以内</option>
-                          <option value="3ヶ月以上">3ヶ月以上</option>
-                          <option value="未定">未定</option>
+                          {dropdownSettings.bantTimeline.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -1124,21 +1164,22 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                         <label className="label text-xs">競合状況</label>
                         <select value={formData.competitorStatus || ''} onChange={(e) => handleChange('competitorStatus', e.target.value)} className="input text-sm py-1.5">
                           <option value="">選択</option>
-                          <option value="なし">なし</option>
-                          <option value="他税理士（知り合い）">他税理士（知り合い）</option>
-                          <option value="他税理士（面談ありサービス）">他税理士（面談ありサービス）</option>
-                          <option value="他税理士（価格安い）">他税理士（価格安い）</option>
-                          <option value="他税理士（サービスがいい）">他税理士（サービスがいい）</option>
+                          {dropdownSettings.competitorStatus.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
                         <label className="label text-xs">自己対応状況</label>
                         <select value={formData.selfHandlingStatus || ''} onChange={(e) => handleChange('selfHandlingStatus', e.target.value)} className="input text-sm py-1.5">
                           <option value="">選択</option>
-                          <option value="なし">なし</option>
-                          <option value="やってみる">やってみる</option>
-                          <option value="商工会議所・青色申告会等サポート">商工会議所・青色申告会等サポート</option>
-                          <option value="自己対応検討">自己対応検討</option>
+                          {dropdownSettings.selfHandlingStatus.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -1187,9 +1228,10 @@ export function DealDetailPanel({ deal, onClose, onSave, isSaving }: DealDetailP
                         <label className="label text-xs">次回アクション内容</label>
                         <select value={formData.nextActionContent || ''} onChange={(e) => handleChange('nextActionContent', e.target.value)} className="input text-sm py-1.5">
                           <option value="">選択</option>
-                          <option value="回答確認">回答確認</option>
-                          {getDropdownOptions('nextActionContent').map(option => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
+                          {dropdownSettings.nextActionContent.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
                           ))}
                         </select>
                       </div>

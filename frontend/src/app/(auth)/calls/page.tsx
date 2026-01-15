@@ -287,7 +287,11 @@ export default function CallsPage() {
       })
     }
     // settingsページを開かなくても最新設定を反映
-    void refreshDropdownSettingsFromDB().finally(handleStorageChange)
+    // DBから設定を取得（既存のlocalStorage設定を上書きしない）
+    void refreshDropdownSettingsFromDB().catch(err => {
+      console.error('Failed to refresh dropdown settings from DB:', err)
+      // エラー時は既存のlocalStorage設定を使用（既存動作を維持）
+    }).finally(handleStorageChange)
     handleStorageChange()
     window.addEventListener('storage', handleStorageChange)
     // インターバルを30秒に延長（頻繁な更新は不要）

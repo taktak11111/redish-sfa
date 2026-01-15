@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { contractSheetsClient, CONTRACT_TEMPLATE_SPREADSHEET_ID } from '@/lib/sheets/contracts'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 // テンプレートのメタデータを取得（GET）
 export async function GET(request: NextRequest) {
