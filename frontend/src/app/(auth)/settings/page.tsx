@@ -196,6 +196,9 @@ function findBestMatch(header: string, sample: string): { key: string; label: st
 }
 
 export default function SettingsPage() {
+  // ハイドレーションエラー防止: クライアントサイドでのみレンダリング
+  const [isMounted, setIsMounted] = useState(false)
+  
   const [settings, setSettings] = useState<DropdownSettings | null>(null)
   const [originalSettings, setOriginalSettings] = useState<DropdownSettings | null>(null)
   const [activeSection, setActiveSection] = useState<string>('call')
@@ -291,6 +294,11 @@ export default function SettingsPage() {
   const [importedRecords, setImportedRecords] = useState<any[]>([])
   const [isLoadingRecords, setIsLoadingRecords] = useState(false)
   const [recordsFilter, setRecordsFilter] = useState<string>('all') // リードソースでフィルタ
+
+  // マウント検出（ハイドレーションエラー防止）
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   useEffect(() => {
     // データベースから設定を読み込む（フォールバック: localStorage）
@@ -1565,6 +1573,18 @@ export default function SettingsPage() {
       fields: [],
     },
   ]
+
+  // マウント前はローディング表示（ハイドレーションエラー防止）
+  if (!isMounted) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div 
+          className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2"
+          style={{ borderColor: '#0083a0' }}
+        ></div>
+      </div>
+    )
+  }
 
   return (
     <div>
