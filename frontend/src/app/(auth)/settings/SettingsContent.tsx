@@ -67,6 +67,16 @@ function camelToSnake(camel: string): string {
     meetsmoreEntityType: 'meetsmore_entity_type',
     makuakePjtPage: 'makuake_pjt_page',
     makuakeExecutorPage: 'makuake_executor_page',
+    restaurantType: 'restaurant_type',
+    desiredLoanamount: 'desired_loan_amount',
+    shopName: 'shop_name',
+    shopPhone: 'shop_phone',
+    temposExternalId: 'tempos_external_id',
+    omcExternalId: 'omc_external_id',
+    temposCpDesk: 'tempos_cp_desk',
+    temposSalesOwner: 'tempos_sales_owner',
+    temposCpCode: 'tempos_cp_code',
+    omcInteriorMatchApplied: 'omc_interior_match_applied',
   }
   
   // マッピングがあればそれを使用、なければ自動変換
@@ -100,6 +110,16 @@ const MAPPABLE_FIELDS = [
   { key: 'meetsmoreEntityType', label: 'Meetsmore法人・個人', required: false },
   { key: 'makuakePjtPage', label: 'MakuakePJT page', required: false },
   { key: 'makuakeExecutorPage', label: 'Makuake実行者page', required: false },
+  { key: 'restaurantType', label: '業態', required: false },
+  { key: 'desiredLoanamount', label: '融資希望額', required: false },
+  { key: 'shopName', label: '店舗名', required: false },
+  { key: 'shopPhone', label: '店舗電話', required: false },
+  { key: 'temposExternalId', label: 'TEMPOS ID', required: false },
+  { key: 'omcExternalId', label: 'OMC ID', required: false },
+  { key: 'temposCpDesk', label: 'TEMPOS受付窓口', required: false },
+  { key: 'temposSalesOwner', label: 'TEMPOS営業担当者', required: false },
+  { key: 'temposCpCode', label: 'TEMPOS担当コード', required: false },
+  { key: 'omcInteriorMatchApplied', label: '内装マッチ申し込み', required: false },
 ]
 
 const DEFAULT_SPREADSHEET_CONFIG: SpreadsheetConfig = {
@@ -144,6 +164,16 @@ function findBestMatch(header: string, sample: string): { key: string; label: st
       linkedDate: ['連携', 'linked', '日付', 'date', '連携日', '取得日'],
       contactPreferredDateTime: ['希望', 'preferred', '連絡', 'contact', '希望日時'],
       allianceRemarks: ['備考', 'remarks', 'メモ', 'memo', 'note', 'コメント', '連携元備考'],
+      restaurantType: ['業態', 'ジャンル', '業種'],
+      desiredLoanamount: ['融資希望', '希望額', '希望金額', '資金', '融資'],
+      shopName: ['店舗名', '店名', '屋号', 'ショップ名'],
+      shopPhone: ['店舗tel', '店舗電話', '店舗TEL', '店電話'],
+      temposExternalId: ['tempos', 'tm', 'tempos id', 'テンポスid', 'テンポス', 'id'],
+      omcExternalId: ['omc', 'oc', 'omc id', 'omc_id', 'omc番号', 'id'],
+      temposCpDesk: ['受付', '窓口', '受付窓口'],
+      temposSalesOwner: ['営業担当', '担当者', '営業'],
+      temposCpCode: ['担当コード', 'cpコード', 'コード'],
+      omcInteriorMatchApplied: ['内装マッチ', '内装', 'マッチ申込', '申込'],
     }
     
     // パターンマッチング

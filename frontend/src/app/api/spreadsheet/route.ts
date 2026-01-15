@@ -125,6 +125,17 @@ const FIELD_TO_SNAKE: Record<string, string> = {
   meetsmoreEntityType: 'meetsmore_entity_type',
   makuakePjtPage: 'makuake_pjt_page',
   makuakeExecutorPage: 'makuake_executor_page',
+  restaurantType: 'restaurant_type',
+  desiredLoanamount: 'desired_loan_amount',
+  shopName: 'shop_name',
+  mobilePhone: 'mobile_phone',
+  shopPhone: 'shop_phone',
+  temposExternalId: 'tempos_external_id',
+  omcExternalId: 'omc_external_id',
+  temposCpDesk: 'tempos_cp_desk',
+  temposSalesOwner: 'tempos_sales_owner',
+  temposCpCode: 'tempos_cp_code',
+  omcInteriorMatchApplied: 'omc_interior_match_applied',
 }
 
 // リードソースのプレフィックスマッピング
