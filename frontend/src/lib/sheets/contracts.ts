@@ -3,6 +3,47 @@ import { google, sheets_v4, drive_v3 } from 'googleapis'
 // 契約書テンプレートのシートID
 export const CONTRACT_TEMPLATE_SPREADSHEET_ID = '15JYERiJcs7k3IxYwmRGTMM-8o_6Tz8t9BW6P6c-91aY'
 
+// Vercel環境変数の形式差（\\n / 実改行 / 前後クォート）に耐える
+export function normalizeGooglePrivateKey(raw?: string): string | undefined {
+  if (!raw) return undefined
+
+  let key = String(raw).trim()
+  // Vercelやコピペで前後にクォートが付くケースを吸収
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1)
+  }
+
+  // "\\n" を実改行へ
+  key = key.replace(/\\n/g, '\n')
+  return key
+}
+
+function extractGoogleApiErrorMessage(error: unknown): string | undefined {
+  const anyErr = error as any
+  const msg =
+    anyErr?.response?.data?.error?.message ||
+    anyErr?.response?.data?.message ||
+    anyErr?.response?.data?.error_description ||
+    anyErr?.errors?.[0]?.message ||
+    anyErr?.message
+
+  const status = anyErr?.response?.status
+  const statusText = anyErr?.response?.statusText
+  const code = anyErr?.code
+
+  const parts = [
+    typeof status === 'number' ? `HTTP ${status}` : undefined,
+    typeof statusText === 'string' && statusText.trim() ? statusText.trim() : undefined,
+    typeof code === 'string' && code.trim() ? `code=${code.trim()}` : undefined,
+    typeof msg === 'string' && msg.trim() ? msg.trim() : undefined,
+  ].filter(Boolean)
+
+  return parts.length > 0 ? parts.join(' / ') : undefined
+}
+
 // 契約書のシート名（テンプレートスプレッドシートの実際のシート名）
 // シートID: 契約=1223117001, REDISH=1723385470, クロスポイント=542860516
 export const CONTRACT_SHEET_NAMES = {
@@ -149,10 +190,21 @@ class ContractSheetsClient {
 
   // 認証クライアントの初期化
   private async getAuth() {
+    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+    const privateKey = normalizeGooglePrivateKey(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY)
+
+    if (!clientEmail || !privateKey) {
+      throw new Error('Google認証情報が未設定です（GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY）')
+    }
+    // Vercel ENV貼り付け事故（BEGIN/END欠落）を早期に検知
+    if (!privateKey.includes('BEGIN PRIVATE KEY')) {
+      throw new Error('Google秘密鍵の形式が不正です（BEGIN/END行を含む秘密鍵をVercelのGOOGLE_SERVICE_ACCOUNT_PRIVATE_KEYに設定してください）')
+    }
+
     return new google.auth.GoogleAuth({
       credentials: {
-        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        private_key: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        client_email: clientEmail,
+        private_key: privateKey,
       },
       scopes: [
         'https://www.googleapis.com/auth/spreadsheets',
@@ -201,7 +253,8 @@ class ContractSheetsClient {
       }
     } catch (error) {
       console.error('[ContractSheetsClient.getSpreadsheetMetadata] Error:', error)
-      throw new Error('スプレッドシートのメタデータ取得に失敗しました')
+      const detail = extractGoogleApiErrorMessage(error)
+      throw new Error(`スプレッドシートのメタデータ取得に失敗しました${detail ? `: ${detail}` : ''}`)
     }
   }
 

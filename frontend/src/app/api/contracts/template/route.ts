@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { contractSheetsClient, CONTRACT_TEMPLATE_SPREADSHEET_ID } from '@/lib/sheets/contracts'
 
+export const runtime = 'nodejs'
+
 // テンプレートのメタデータを取得（GET）
 export async function GET(request: NextRequest) {
   try {

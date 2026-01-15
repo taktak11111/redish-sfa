@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Deal } from '@/types/sfa'
-import { getDropdownOptions, DropdownOption } from '@/lib/dropdownSettings'
+import { getDropdownOptions, refreshDropdownSettingsFromDB, DropdownOption } from '@/lib/dropdownSettings'
 import { previewContract, generateContract, convertFormToContractData, downloadPdf } from '@/lib/contracts'
 import { ContractPdfPreviewModal } from './ContractPdfPreviewModal'
 
@@ -174,6 +174,14 @@ export function ContractDetailPanel({
   // ドロップダウン選択肢を取得
   const [staffOptions, setStaffOptions] = useState<DropdownOption[]>([])
   
+  // DBから設定を取得（初回読み込み時のみ、既存のlocalStorage設定を上書きしない）
+  useEffect(() => {
+    refreshDropdownSettingsFromDB().catch(err => {
+      console.error('Failed to refresh dropdown settings from DB:', err)
+      // エラー時は既存のlocalStorage設定を使用（既存動作を維持）
+    })
+  }, [])
+
   useEffect(() => {
     // ドロップダウン設定を読み込み
     setStaffOptions(getDropdownOptions('contractStaff'))
@@ -374,9 +382,47 @@ export function ContractDetailPanel({
     setPaymentData(prev => ({ ...prev, [field]: value }))
   }
 
+  // 契約フォーム（contractFormData）の入力を、Deal更新に反映できるフィールドへ写像する
+  // ※現状のDB/型（Deal）に存在する項目のみ保存対象にする
+  const buildDealUpdatesFromContractFormData = (): Partial<Deal> => {
+    const updates: Partial<Deal> = {}
+
+    if (contractFormData.representativeName !== undefined) {
+      updates.contactName = contractFormData.representativeName
+    }
+    if (contractFormData.representativeNameKana !== undefined) {
+      updates.contactNameKana = contractFormData.representativeNameKana
+    }
+    if (contractFormData.tel !== undefined) {
+      updates.phone = contractFormData.tel
+    }
+    if (contractFormData.mail !== undefined) {
+      updates.email = contractFormData.mail
+    }
+    if (contractFormData.openingAddress !== undefined) {
+      updates.address = contractFormData.openingAddress
+    }
+
+    // 事業種別（A:飲食 / B:非飲食）をDeal.categoryへ反映
+    if (contractFormData.businessType === 'A:飲食' || contractFormData.businessType === 'B:非飲食') {
+      updates.category = contractFormData.businessType
+    }
+
+    // 法人名（漢字）をDeal.companyNameへ反映（法人の場合のみ）
+    if (contractFormData.entityType === '法人' && contractFormData.corporateName !== undefined) {
+      updates.companyName = contractFormData.corporateName
+    }
+
+    return updates
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSave(formData)
+    // 契約フォームの入力も、保存対象（Deal）へ反映して保存する
+    onSave({
+      ...formData,
+      ...buildDealUpdatesFromContractFormData(),
+    })
   }
 
   const toggleSection = (section: string) => {
