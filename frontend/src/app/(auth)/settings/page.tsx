@@ -263,8 +263,8 @@ export default function SettingsPage() {
   const [pendingMappingIndex, setPendingMappingIndex] = useState<number | null>(null) // カスタムフィールド追加後にマッピングする列のインデックス
   const [editingCustomFieldId, setEditingCustomFieldId] = useState<string | null>(null) // 編集中のカスタムフィールドID
   
-  // 開発環境かどうかを判定（クライアントサイド）
-  const isDevelopment = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  // 開発環境かどうかを判定（サーバー・クライアントで同じ値になるよう NODE_ENV を使用）
+  const isDevelopment = process.env.NODE_ENV === 'development'
   
   // ユーザー権限管理用のstate
   const [users, setUsers] = useState<any[]>([])
