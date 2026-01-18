@@ -113,27 +113,32 @@ export default function CallAnalysisPage() {
 
   const tableData = activeSubTab === 'staff' ? data?.staffPerformance : data?.channelPerformance
 
+  // タブUI共通コンポーネント
+  const TabButtons = () => (
+    <div className="flex gap-4 border-b border-gray-200 pb-2">
+      <button
+        onClick={() => onChangeTab('result')}
+        className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
+          activeTab === 'result' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
+        }`}
+      >
+        結果分析
+      </button>
+      <button
+        onClick={() => onChangeTab('process')}
+        className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
+          activeTab === 'process' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
+        }`}
+      >
+        プロセス分析
+      </button>
+    </div>
+  )
+
   if (activeTab === 'process') {
     return (
       <div className="space-y-4">
-        <div className="flex gap-4 border-b border-gray-200 pb-2">
-          <button
-            onClick={() => onChangeTab('result')}
-            className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
-              activeTab === 'result' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
-            }`}
-          >
-            結果分析
-          </button>
-          <button
-            onClick={() => onChangeTab('process')}
-            className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
-              activeTab === 'process' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
-            }`}
-          >
-            プロセス分析
-          </button>
-        </div>
+        <TabButtons />
         <CallProcessAnalysis />
       </div>
     )
@@ -153,24 +158,7 @@ export default function CallAnalysisPage() {
       </div>
 
       {/* タブ（結果 / プロセス） */}
-      <div className="flex gap-4 border-b border-gray-200 pb-2">
-        <button
-          onClick={() => onChangeTab('result')}
-          className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
-            activeTab === 'result' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
-          }`}
-        >
-          結果分析
-        </button>
-        <button
-          onClick={() => onChangeTab('process')}
-          className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
-            activeTab === 'process' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
-          }`}
-        >
-          プロセス分析
-        </button>
-      </div>
+      <TabButtons />
 
       {/* 主要KPIカード */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
