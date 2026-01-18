@@ -1,11 +1,19 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { DealResultAnalysis } from '@/components/DealResultAnalysis'
 import { DealProcessAnalysis } from '@/components/DealProcessAnalysis'
 
 export default function DealAnalysisPage() {
+  return (
+    <Suspense fallback={<div className="p-4">読み込み中...</div>}>
+      <DealAnalysisContent />
+    </Suspense>
+  )
+}
+
+function DealAnalysisContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { 
@@ -43,6 +43,14 @@ interface CallAnalysisData {
 }
 
 export default function CallAnalysisPage() {
+  return (
+    <Suspense fallback={<div className="p-4">読み込み中...</div>}>
+      <CallAnalysisContent />
+    </Suspense>
+  )
+}
+
+function CallAnalysisContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 

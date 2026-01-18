@@ -1,10 +1,18 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { UserManualPage } from '@/components/UserManualPage'
 
 export default function LearningCenterPage() {
+  return (
+    <Suspense fallback={<div className="p-4">読み込み中...</div>}>
+      <LearningCenterContent />
+    </Suspense>
+  )
+}
+
+function LearningCenterContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
