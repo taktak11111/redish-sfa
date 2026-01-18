@@ -95,7 +95,7 @@ function formatLeadSourceShort(value?: string): string {
 
 function normalizeStatusIs(value?: string): string {
   if (!value) return ''
-  return value.replace(/^[0-9A-Za-z]+[.．]\s*/u, '').trim()
+  return value.replace(/^[0-9A-Za-z]+[.．]\s*/, '').trim()
 }
 
 function compareValues(a: unknown, b: unknown): number {
