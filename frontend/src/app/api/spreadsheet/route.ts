@@ -572,9 +572,12 @@ export async function POST(request: NextRequest) {
     console.log(`[API/spreadsheet] Importing data from ${sourceLabel}: ${spreadsheetId || 'local-file'}, gid: ${sheetGid || 'auto'}, headerRow: ${headerRow}, updateMode: ${updateMode}, incrementalLimit: ${incrementalLimit}`)
     
     // スプレッドシート/CSVからデータを取得
+    if (uploadMode !== 'file' && !spreadsheetId) {
+      return NextResponse.json({ error: 'スプレッドシートIDが必要です' }, { status: 400 })
+    }
     const data = uploadMode === 'file'
       ? (csvRows || [])
-      : await fetchSpreadsheetData(spreadsheetId, sheetName, sheetGid)
+      : await fetchSpreadsheetData(spreadsheetId!, sheetName, sheetGid)
     
     // ヘッダー行のインデックス（1-indexed → 0-indexed）
     const headerIndex = Math.max(0, headerRow - 1)
