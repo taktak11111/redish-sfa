@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-01-17T04:03:14.023Z",
+  "summary": {
+    "csvCount": 2324,
+    "dbCount": 2324,
+    "matchCount": 2320,
+    "mismatchCount": 4
+  },
+  "mismatches": [
+    {
+      "leadId": "RD0005",
+      "type": "field_mismatch",
+      "fields": [
+        {
+          "column": "B:リードソース",
+          "csvValue": "ソース不明",
+          "dbValue": "REDISH"
+        },
+        {
+          "column": "M:連携元備考",
+          "csvValue": "(空)",
+          "dbValue": "元リードソース: ソース不明"
+        }
+      ]
+    },
+    {
+      "leadId": "RD0013",
+      "type": "field_mismatch",
+      "fields": [
+        {
+          "column": "C:連携日",
+          "csvValue": "2025/0612",
+          "dbValue": "2025-06-12"
+        },
+        {
+          "column": "N:OMC追加情報①",
+          "csvValue": "OMC顧客",
+          "dbValue": "(空)"
+        },
+        {
+          "column": "P:物件状況",
+          "csvValue": "申込中",
+          "dbValue": "(空)"
+        }
+      ]
+    },
+    {
+      "leadId": "RP0002",
+      "type": "field_mismatch",
+      "fields": [
+        {
+          "column": "B:リードソース",
+          "csvValue": "RDパートナー",
+          "dbValue": "REDISH"
+        },
+        {
+          "column": "M:連携元備考",
+          "csvValue": "(空)",
+          "dbValue": "元リードソース: RDパートナー"
+        }
+      ]
+    },
+    {
+      "leadId": "RP0003",
+      "type": "field_mismatch",
+      "fields": [
+        {
+          "column": "B:リードソース",
+          "csvValue": "RDパートナー",
+          "dbValue": "REDISH"
+        },
+        {
+          "column": "M:連携元備考",
+          "csvValue": "(空)",
+          "dbValue": "元リードソース: RDパートナー"
+        }
+      ]
+    }
+  ]
+}

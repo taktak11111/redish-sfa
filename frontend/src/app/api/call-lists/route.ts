@@ -574,7 +574,7 @@ async function getLeadIdsByConditions(
     }
     // 折返し（ISステータスがコンタクト試行中系、または次回架電日が今日）→ 優先度2、最終架電日降順
     else if (
-      ['02.コンタクト試行中', 'コンタクト試行中（折り返し）'].includes(r.status_is) ||
+      ['02.コンタクト試行中', 'コンタクト試行中（折り返し含む）'].includes(r.status_is) ||
       normalizeDateStringToYmd(String(r.next_action_date || '')) === today
     ) {
       priority = 2

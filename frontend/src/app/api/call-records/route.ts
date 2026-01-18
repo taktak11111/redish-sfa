@@ -25,11 +25,27 @@ export async function GET(request: NextRequest) {
     
     const supabase = getSupabaseClient()
     
+    // 総件数を取得
+    let countQuery = supabase
+      .from('call_records')
+      .select('*', { count: 'exact', head: true })
+    
+    if (leadSource && leadSource !== 'all') {
+      countQuery = countQuery.eq('lead_source', leadSource)
+    }
+    
+    const { count: totalCount } = await countQuery
+    
+    // データを取得
     let query = supabase
       .from('call_records')
       .select('*')
       .order('linked_date', { ascending: false })
-      .limit(limit)
+    
+    // limit=0の場合は制限なし、それ以外はlimitを適用
+    if (limit > 0) {
+      query = query.limit(limit)
+    }
     
     if (leadSource && leadSource !== 'all') {
       query = query.eq('lead_source', leadSource)
@@ -42,7 +58,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
     
-    return NextResponse.json({ records: data || [] })
+    return NextResponse.json({ records: data || [], totalCount })
   } catch (error: any) {
     console.error('[API/call-records] GET error:', error)
     return NextResponse.json(

@@ -6,24 +6,41 @@ import { CallRecord, CallStatus } from '@/types/sfa'
 import { LeadDetailPanel } from '@/components/leads/LeadDetailPanel'
 import { DateRangeFilter, DateRange } from '@redish/shared'
 
-const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [
+// 架電管理と同じステータスオプション
+const STATUS_OPTIONS: { value: string; label: string; color: string }[] = [
   { value: '未架電', label: '未架電', color: 'badge-gray' },
-  { value: '架電中', label: '架電中', color: 'badge-info' },
-  { value: '03.アポイント獲得済', label: 'アポイント獲得済', color: 'badge-success' },
-  { value: '09.アポ獲得', label: 'アポ獲得', color: 'badge-success' },
-  { value: '04.アポなし', label: 'アポなし', color: 'badge-danger' },
+  { value: '通電', label: '通電', color: 'badge-success' },
+  { value: '不通', label: '不通', color: 'badge-warning' },
+  { value: '未入力', label: '未入力', color: 'badge-gray' },
+  { value: 'その他', label: 'その他', color: 'badge-gray' },
 ]
 
-// リードソースのオプション
-const LEAD_SOURCE_OPTIONS = [
-  { value: 'all', label: 'すべてのソース' },
-  { value: 'Meetsmore', label: 'Meetsmore' },
-  { value: 'TEMPOS', label: 'TEMPOS' },
-  { value: 'OMC', label: 'OMC' },
-  { value: 'Amazon', label: 'Amazon' },
-  { value: 'Makuake', label: 'Makuake' },
-  { value: 'REDISH', label: 'REDISH' },
+// 架電管理と同じリード結果オプション
+const LEAD_RESULT_OPTIONS: string[] = [
+  '新規リード',
+  'コンタクト試行中（折り返し含む）',
+  '商談獲得',
+  '失注（リサイクル対象外）',
+  '失注（リサイクル対象 A-E付与）',
+  '対象外（Disqualified）',
+  '連絡不能（Unreachable）',
+  '既存顧客（属性へ移行予定）',
 ]
+
+// ISステータスの正規化（架電管理と同じ）
+function normalizeStatusIs(raw: string): string {
+  if (!raw) return ''
+  const trimmed = raw.trim()
+  if (/^0?1[.\s]*(新規|リード)/.test(trimmed) || trimmed === '新規リード') return '新規リード'
+  if (/^0?2[.\s]*コンタクト/.test(trimmed) || trimmed.includes('コンタクト試行中')) return 'コンタクト試行中（折り返し含む）'
+  if (/^0?3[.\s]*(アポ|商談)/.test(trimmed) || trimmed === '商談獲得') return '商談獲得'
+  if (/失注.*リサイクル対象外/.test(trimmed) || /^0?4[.\s]*失注/.test(trimmed)) return '失注（リサイクル対象外）'
+  if (/失注.*リサイクル対象/.test(trimmed) || /ナーチャリング/.test(trimmed)) return '失注（リサイクル対象 A-E付与）'
+  if (/Disqualified|対象外/.test(trimmed) || /^05a/.test(trimmed)) return '対象外（Disqualified）'
+  if (/Unreachable|連絡不能/.test(trimmed) || /^05b/.test(trimmed)) return '連絡不能（Unreachable）'
+  if (/既存顧客/.test(trimmed) || /^0?7/.test(trimmed)) return '既存顧客（属性へ移行予定）'
+  return trimmed
+}
 
 type SortDirection = 'asc' | 'desc'
 type SortConfig = { key: string; direction: SortDirection } | null
@@ -81,7 +98,8 @@ function SortIcons({ active }: { active?: SortDirection }) {
 
 export default function LeadsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all')
-  const [filterSource, setFilterSource] = useState<string>('all')
+  const [filterLeadResult, setFilterLeadResult] = useState<string>('all')
+  const [filterLeadSource, setFilterLeadSource] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedRecord, setSelectedRecord] = useState<CallRecord | null>(null)
@@ -102,7 +120,6 @@ export default function LeadsPage() {
     address: 200,
     openingDate: 120,
     contactPreferredDateTime: 150,
-    allianceRemarks: 200,
     status: 120,
   })
   const [resizingColumn, setResizingColumn] = useState<string | null>(null)
@@ -164,8 +181,46 @@ export default function LeadsPage() {
   }, [resizingColumn, resizeStartX, resizeStartWidth])
 
   const filteredRecords = (data?.data as CallRecord[] || []).filter(record => {
-    const matchesStatus = filterStatus === 'all' || record.status === filterStatus
-    const matchesSource = filterSource === 'all' || record.leadSource === filterSource
+    // ステータスフィルタ（架電管理と同じロジック）
+    const callResult = String(record.callStatusToday || record.resultContactStatus || '').trim()
+    const normalizedStatusIs = normalizeStatusIs(String(record.statusIS || '').trim())
+    let matchesStatus = filterStatus === 'all'
+    if (filterStatus === '不通') {
+      matchesStatus = /^(不通|未通)\d*$/.test(callResult) || callResult === '未通電'
+    } else if (filterStatus === '通電') {
+      matchesStatus = callResult === '通電'
+    } else if (filterStatus === '未架電') {
+      const isNewLead = normalizedStatusIs === '新規リード'
+      matchesStatus = isNewLead && callResult === '未架電'
+    } else if (filterStatus === '未入力') {
+      matchesStatus = callResult === ''
+    } else if (filterStatus === 'その他') {
+      const isNotsu = /^(不通|未通)\d*$/.test(callResult) || callResult === '未通電'
+      const isTsuden = callResult === '通電'
+      const isNewLeadMikaden = normalizedStatusIs === '新規リード' && callResult === '未架電'
+      const isEmpty = callResult === ''
+      matchesStatus = !isNotsu && !isTsuden && !isNewLeadMikaden && !isEmpty
+    } else if (filterStatus !== 'all') {
+      matchesStatus = record.status === filterStatus
+    }
+
+    // リード結果フィルタ（架電管理と同じロジック）
+    let matchesLeadResult = filterLeadResult === 'all'
+    if (filterLeadResult === '未入力') {
+      matchesLeadResult = normalizedStatusIs === ''
+    } else if (filterLeadResult !== 'all') {
+      matchesLeadResult = normalizedStatusIs === filterLeadResult
+    }
+
+    // リードソースフィルタ（未入力対応）
+    const leadSourceValue = String(record.leadSource || '').trim()
+    let matchesLeadSource = filterLeadSource === 'all'
+    if (filterLeadSource === '未入力') {
+      matchesLeadSource = leadSourceValue === ''
+    } else if (filterLeadSource !== 'all') {
+      matchesLeadSource = leadSourceValue === filterLeadSource
+    }
+
     const matchesSearch = searchTerm === '' || 
       record.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       record.contactName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -181,8 +236,19 @@ export default function LeadsPage() {
       matchesDateRange = recordDate >= dateRange.start && recordDate <= dateRange.end
     }
     
-    return matchesStatus && matchesSource && matchesSearch && matchesDateRange
+    return matchesStatus && matchesLeadResult && matchesLeadSource && matchesSearch && matchesDateRange
   })
+
+  // リードソースの選択肢をDBから動的取得
+  const leadSourceOptions = useMemo(() => {
+    const allRecords = data?.data as CallRecord[] || []
+    const sources = new Set<string>()
+    allRecords.forEach(record => {
+      const source = String(record.leadSource || '').trim()
+      if (source) sources.add(source)
+    })
+    return Array.from(sources).sort()
+  }, [data?.data])
 
   const sortedRecords = useMemo(() => {
     if (!sortConfig) return filteredRecords
@@ -315,37 +381,23 @@ export default function LeadsPage() {
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3 lg:justify-end lg:items-center">
-                  <div className="sm:w-[520px] lg:w-[520px]">
+                  <div className="sm:w-[300px] lg:w-[300px]">
                     <input
                       type="text"
-                      placeholder="会社名、担当者名、電話番号、メール、リードIDで検索..."
+                      placeholder="会社名、担当者名、電話番号"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="input w-full"
                     />
                   </div>
-                  <div className="sm:w-52 lg:w-52">
-                    <select
-                      value={filterSource}
-                      onChange={(e) => setFilterSource(e.target.value)}
-                      className="input w-full"
-                      aria-label="リードソースでフィルタ"
-                    >
-                      {LEAD_SOURCE_OPTIONS.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="sm:w-52 lg:w-52">
+                  <div className="sm:w-40 lg:w-40">
                     <select
                       value={filterStatus}
                       onChange={(e) => setFilterStatus(e.target.value)}
                       className="input w-full"
                       aria-label="ステータスでフィルタ"
                     >
-                      <option value="all">すべてのステータス</option>
+                      <option value="all">ステータス</option>
                       {STATUS_OPTIONS.map(option => (
                         <option key={option.value} value={option.value}>
                           {option.label}
@@ -353,16 +405,51 @@ export default function LeadsPage() {
                       ))}
                     </select>
                   </div>
+                  <div className="sm:w-52 lg:w-52">
+                    <select
+                      value={filterLeadResult}
+                      onChange={(e) => setFilterLeadResult(e.target.value)}
+                      className="input w-full"
+                      aria-label="リード結果でフィルタ"
+                    >
+                      <option value="all">リード結果</option>
+                      {LEAD_RESULT_OPTIONS.map(option => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                      <option value="未入力">未入力</option>
+                    </select>
+                  </div>
+                  <div className="sm:w-40 lg:w-40">
+                    <select
+                      value={filterLeadSource}
+                      onChange={(e) => setFilterLeadSource(e.target.value)}
+                      className="input w-full"
+                      aria-label="リードソースでフィルタ"
+                    >
+                      <option value="all">リードソース</option>
+                      {leadSourceOptions.map(source => (
+                        <option key={source} value={source}>
+                          {source}
+                        </option>
+                      ))}
+                      <option value="未入力">未入力</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
               <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
                 <span>全 {filteredRecords.length} 件</span>
-                {filterSource !== 'all' && (
-                  <span className="badge badge-info">{filterSource}</span>
-                )}
                 {filterStatus !== 'all' && (
                   <span className="badge badge-gray">{STATUS_OPTIONS.find(s => s.value === filterStatus)?.label}</span>
+                )}
+                {filterLeadResult !== 'all' && (
+                  <span className="badge badge-info">{filterLeadResult}</span>
+                )}
+                {filterLeadSource !== 'all' && (
+                  <span className="badge badge-info">{filterLeadSource}</span>
                 )}
               </div>
           </div>
@@ -386,10 +473,10 @@ export default function LeadsPage() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
-                        setFilterSource(filterSource === source ? 'all' : source)
+                        setFilterLeadSource(filterLeadSource === source ? 'all' : source)
                       }}
                       className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                        filterSource === source
+                        filterLeadSource === source
                           ? 'bg-[#0083a0] text-white'
                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                       }`}
@@ -423,28 +510,28 @@ export default function LeadsPage() {
                   <button
                     key={source}
                     type="button"
-                    onClick={() => setFilterSource(filterSource === source ? 'all' : source)}
+                    onClick={() => setFilterLeadSource(filterLeadSource === source ? 'all' : source)}
                     className={`px-3 py-2 rounded-lg border-2 text-center transition-all ${
-                      filterSource === source
+                      filterLeadSource === source
                         ? 'border-[#0083a0] bg-gradient-to-b from-[#e6f7fa] to-[#d0f0f5] shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
                         : 'border-gray-200 bg-gradient-to-b from-white to-gray-50 hover:border-[#0083a0]/50 shadow-md hover:shadow-lg transform hover:-translate-y-0.5'
                     }`}
                   >
-                    <div className={`flex items-baseline justify-center gap-0.5 ${filterSource === source ? 'text-[#0083a0]' : 'text-gray-900'}`}>
+                    <div className={`flex items-baseline justify-center gap-0.5 ${filterLeadSource === source ? 'text-[#0083a0]' : 'text-gray-900'}`}>
                       <span className="text-2xl font-bold">{count}</span>
                       <span className="text-xs text-gray-400">件</span>
                     </div>
-                    <div className={`text-xs truncate mt-1 ${filterSource === source ? 'text-[#0083a0] font-medium' : 'text-gray-500'}`}>
+                    <div className={`text-xs truncate mt-1 ${filterLeadSource === source ? 'text-[#0083a0] font-medium' : 'text-gray-500'}`}>
                       {source}
                     </div>
                   </button>
                 ))}
               </div>
-              {filterSource !== 'all' && (
+              {filterLeadSource !== 'all' && (
                 <div className="mt-3 flex justify-end">
                   <button
                     type="button"
-                    onClick={() => setFilterSource('all')}
+                    onClick={() => setFilterLeadSource('all')}
                     className="text-xs text-gray-500 hover:text-gray-700 underline"
                   >
                     フィルタをクリア
@@ -475,7 +562,6 @@ export default function LeadsPage() {
                     { key: 'address', label: '住所/エリア' },
                     { key: 'openingDate', label: '開業時期' },
                     { key: 'contactPreferredDateTime', label: '連絡希望日時' },
-                    { key: 'allianceRemarks', label: '連携元備考' },
                     { key: 'status', label: 'ステータス' },
                   ].map((col, idx, arr) => (
                     <th
@@ -507,7 +593,7 @@ export default function LeadsPage() {
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <tr key={`loading-${i}`}>
-                      {[...Array(14)].map((_, j) => (
+                      {[...Array(13)].map((_, j) => (
                         <td key={`loading-${i}-${j}`} className="px-4 py-4">
                           <div className="h-4 bg-gray-100 rounded animate-pulse"></div>
                         </td>
@@ -516,7 +602,7 @@ export default function LeadsPage() {
                   ))
                 ) : filteredRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
                       リードデータがありません
                     </td>
                   </tr>
@@ -562,9 +648,6 @@ export default function LeadsPage() {
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.contactPreferredDateTime, minWidth: 20 }}>
                         {record.contactPreferredDateTime || '-'}
-                      </td>
-                      <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.allianceRemarks, minWidth: 20 }}>
-                        {record.allianceRemarks || '-'}
                       </td>
                       <td className="px-4 py-4 text-sm" style={{ width: columnWidths.status, minWidth: 20 }}>
                         {getStatusBadge(record.status)}

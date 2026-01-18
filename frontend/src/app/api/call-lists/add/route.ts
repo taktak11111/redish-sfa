@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
         priority = 1
         sortDate = r.linked_date || '1900-01-01'
       } else if (
-        ['02.コンタクト試行中', 'コンタクト試行中（折り返し）'].includes(r.status_is) ||
+        ['02.コンタクト試行中', 'コンタクト試行中（折り返し含む）'].includes(r.status_is) ||
         normalizeDateStringToYmd(String(r.next_action_date || '')) === today
       ) {
         priority = 2

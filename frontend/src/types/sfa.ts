@@ -21,9 +21,13 @@ export const LEAD_ID_PREFIX: Record<LeadSource, string> = {
 export type CallStatus = 
   | '未架電'
   | '架電中'
+  | '架電対象外'
+  | '通電'
   | '03.アポイント獲得済'
   | '09.アポ獲得'
   | '04.アポなし'
+  | '商談獲得'
+  | '不通'
 
 // 架電履歴の状況
 export type CallHistoryStatus = 
@@ -107,6 +111,8 @@ export interface CallRecord {
   contactName: string // 氏名
   contactNameKana?: string // ふりがな
   phone: string // 電話番号
+  isDuplicate?: boolean // 重複フラグ
+  duplicateKey?: string // 重複判定キー（電話番号）
   email?: string // メールアドレス
   address?: string // 住所／エリア
   openingDateOriginal?: string // 開業時期（連携元・自由記述）
@@ -118,6 +124,7 @@ export interface CallRecord {
   omcAdditionalInfo1?: string // OMC追加情報①（後方互換性のため残す）
   omcSelfFunds?: string // ⓶自己資金（後方互換性のため残す）
   omcPropertyStatus?: string // ⓷物件状況（後方互換性のため残す）
+  desiredLoanamount?: string // 融資希望額
   sourceSpecificData?: Record<string, any> // リードソース別情報（JSONB形式）
   amazonTaxAccountant?: string // Amazon税理士有無
   meetsmoreLink?: string // Meetsmoreリンク
@@ -187,7 +194,7 @@ export interface CallListCondition {
   newLeads?: boolean // 新規リード（未架電）- 自動的に本日の架電リストに追加（必須）
   noConnectionLeads?: boolean // 不通リード
   maxNoConnectionCallCount?: number // 不通リード抽出時の架電回数上限（例: 5）
-  callbackLeads?: boolean // 折返し（ISステータスが「コンタクト試行中（折り返し）」）
+  callbackLeads?: boolean // 折返し（ISステータスが「コンタクト試行中（折り返し含む）」）
   recallLeads?: boolean // 再架電対象リード
   recycleLeads?: boolean // リサイクル対象リード
   manualSelection?: boolean // 手動選択

@@ -1,4 +1,4 @@
-export type PresetKey = 'allTime' | 'today' | 'thisWeek' | 'thisMonth' | 'lastMonth' | 'fiscalYear'
+export type PresetKey = 'allTime' | 'today' | 'thisWeek' | 'thisMonth' | 'lastMonth' | 'fiscalYear' | 'thisYear'
 
 export interface DateRange {
   start: Date

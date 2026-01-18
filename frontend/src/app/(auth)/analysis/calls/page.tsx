@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
@@ -8,6 +9,7 @@ import {
 } from 'recharts'
 import { format } from 'date-fns'
 import { DateRangeFilter, DateRange } from '@redish/shared'
+import { CallProcessAnalysis } from '@/components/CallProcessAnalysis'
 
 interface CallAnalysisData {
   summary: {
@@ -41,8 +43,54 @@ interface CallAnalysisData {
 }
 
 export default function CallAnalysisPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const tabFromQuery = searchParams.get('tab')
+  const normalizedTabFromQuery = tabFromQuery === 'result' || tabFromQuery === 'process' ? tabFromQuery : null
+
   const [dateRange, setDateRange] = useState<DateRange | null>(null)
-  const [activeTab, setActiveTab] = useState<'staff' | 'channel'>('staff')
+  const [activeTab, setActiveTab] = useState<'result' | 'process'>(normalizedTabFromQuery ?? 'result')
+  const [activeSubTab, setActiveSubTab] = useState<'staff' | 'channel'>('staff')
+
+  const persistKey = 'analysis.calls.tab'
+
+  const syncUrl = useMemo(() => {
+    return (nextTab: 'result' | 'process') => {
+      const next = new URLSearchParams(searchParams.toString())
+      next.set('tab', nextTab)
+      router.replace(`/analysis/calls?${next.toString()}`)
+    }
+  }, [router, searchParams])
+
+  // 初期タブ決定: URL > localStorage > default、かつ常にURLへ反映
+  useEffect(() => {
+    if (normalizedTabFromQuery) {
+      try {
+        localStorage.setItem(persistKey, normalizedTabFromQuery)
+      } catch {}
+      setActiveTab(normalizedTabFromQuery)
+      return
+    }
+
+    let stored: 'result' | 'process' | null = null
+    try {
+      const v = localStorage.getItem(persistKey)
+      stored = v === 'result' || v === 'process' ? v : null
+    } catch {}
+
+    const decided = stored ?? 'result'
+    setActiveTab(decided)
+    syncUrl(decided)
+  }, [normalizedTabFromQuery, syncUrl])
+
+  const onChangeTab = (nextTab: 'result' | 'process') => {
+    setActiveTab(nextTab)
+    try {
+      localStorage.setItem(persistKey, nextTab)
+    } catch {}
+    syncUrl(nextTab)
+  }
 
   const { data, isLoading, error } = useQuery<CallAnalysisData>({
     queryKey: ['call-analysis', dateRange?.start?.toISOString(), dateRange?.end?.toISOString()],
@@ -63,7 +111,33 @@ export default function CallAnalysisPage() {
 
   if (error) return <div className="p-4 text-red-600">エラーが発生しました: {(error as Error).message}</div>
 
-  const tableData = activeTab === 'staff' ? data?.staffPerformance : data?.channelPerformance
+  const tableData = activeSubTab === 'staff' ? data?.staffPerformance : data?.channelPerformance
+
+  if (activeTab === 'process') {
+    return (
+      <div className="space-y-4">
+        <div className="flex gap-4 border-b border-gray-200 pb-2">
+          <button
+            onClick={() => onChangeTab('result')}
+            className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
+              activeTab === 'result' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            結果分析
+          </button>
+          <button
+            onClick={() => onChangeTab('process')}
+            className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
+              activeTab === 'process' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            プロセス分析
+          </button>
+        </div>
+        <CallProcessAnalysis />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 pb-12">
@@ -76,6 +150,26 @@ export default function CallAnalysisPage() {
           defaultPreset="thisMonth"
           onChange={setDateRange}
         />
+      </div>
+
+      {/* タブ（結果 / プロセス） */}
+      <div className="flex gap-4 border-b border-gray-200 pb-2">
+        <button
+          onClick={() => onChangeTab('result')}
+          className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
+            activeTab === 'result' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          結果分析
+        </button>
+        <button
+          onClick={() => onChangeTab('process')}
+          className={`text-sm font-semibold pb-1 border-b-2 transition-all ${
+            activeTab === 'process' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          プロセス分析
+        </button>
       </div>
 
       {/* 主要KPIカード */}
@@ -139,14 +233,14 @@ export default function CallAnalysisPage() {
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <div className="flex gap-4">
             <button 
-              onClick={() => setActiveTab('staff')}
-              className={`text-sm font-semibold pb-1 border-b-2 transition-all ${activeTab === 'staff' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+              onClick={() => setActiveSubTab('staff')}
+              className={`text-sm font-semibold pb-1 border-b-2 transition-all ${activeSubTab === 'staff' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
             >
               担当者別分析
             </button>
             <button 
-              onClick={() => setActiveTab('channel')}
-              className={`text-sm font-semibold pb-1 border-b-2 transition-all ${activeTab === 'channel' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+              onClick={() => setActiveSubTab('channel')}
+              className={`text-sm font-semibold pb-1 border-b-2 transition-all ${activeSubTab === 'channel' ? 'border-[#0083a0] text-[#0083a0]' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
             >
               チャネル別分析
             </button>
@@ -156,7 +250,7 @@ export default function CallAnalysisPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">{activeTab === 'staff' ? '担当者' : 'チャネル'}</th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">{activeSubTab === 'staff' ? '担当者' : 'チャネル'}</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">架電数</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">アポ獲得</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">商談設定</th>

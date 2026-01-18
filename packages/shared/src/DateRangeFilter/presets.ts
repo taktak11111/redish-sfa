@@ -92,6 +92,15 @@ export const presetConfigs: PresetConfig[] = [
     }
   },
   {
+    key: 'thisYear',
+    label: '今年',
+    getRange: () => {
+      const today = new Date()
+      const year = today.getFullYear()
+      return { start: startOfDay(new Date(year, 0, 1)), end: endOfDay(new Date(year, 11, 31)) }
+    }
+  },
+  {
     key: 'fiscalYear',
     label: '今年度',
     getRange: (fiscalYearStart: number) => {

@@ -95,6 +95,8 @@ export async function POST(request: NextRequest) {
           header_row: config.headerRow,
           column_mappings: config.columnMappings || [],
           last_imported_at: config.lastImportedAt || null,
+          update_mode: config.updateMode || 'incremental',
+          incremental_limit: config.incrementalLimit || 100,
           updated_at: new Date().toISOString(),
           created_by: userId,
         }

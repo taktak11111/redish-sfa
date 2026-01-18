@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { DateRangeFilterProps, DateRange, PresetKey } from './types'
 import { presetConfigs, getPresetRange } from './presets'
 
-const DEFAULT_PRESETS: PresetKey[] = ['today', 'thisWeek', 'thisMonth', 'lastMonth', 'fiscalYear', 'allTime']
+const DEFAULT_PRESETS: PresetKey[] = ['today', 'thisWeek', 'thisMonth', 'lastMonth', 'thisYear', 'fiscalYear', 'allTime']
 
 export function DateRangeFilter({
   defaultPreset = 'allTime',
@@ -145,7 +145,8 @@ export function DateRangeFilter({
                     type="date"
                     value={customStart}
                     onChange={(e) => setCustomStart(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#0083a0]"
+                    onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#0083a0] cursor-pointer"
                   />
                 </div>
                 <span className="text-gray-400 mt-5">〜</span>
@@ -158,7 +159,8 @@ export function DateRangeFilter({
                     type="date"
                     value={customEnd}
                     onChange={(e) => setCustomEnd(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#0083a0]"
+                    onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#0083a0] cursor-pointer"
                   />
                 </div>
               </div>

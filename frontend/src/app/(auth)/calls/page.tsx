@@ -5,15 +5,28 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CallRecord, CallStatus, CallList, CallListCondition } from '@/types/sfa'
 import { CallDetailPanel } from '@/components/calls/CallDetailPanel'
 import { CallListCreateModal } from '@/components/calls/CallListCreateModal'
+import { LeadRegisterModal, type LeadFormData } from '@/components/calls/LeadRegisterModal'
 import { DateRangeFilter, DateRange } from '@redish/shared'
 import { getDropdownOptions, refreshDropdownSettingsFromDB, type DropdownOption } from '@/lib/dropdownSettings'
 
-const STATUS_OPTIONS: { value: CallStatus; label: string; color: string }[] = [
+const STATUS_OPTIONS: { value: string; label: string; color: string }[] = [
   { value: '未架電', label: '未架電', color: 'badge-gray' },
-  { value: '架電中', label: '架電中', color: 'badge-info' },
-  { value: '03.アポイント獲得済', label: 'アポイント獲得済', color: 'badge-success' },
-  { value: '09.アポ獲得', label: 'アポ獲得', color: 'badge-success' },
-  { value: '04.アポなし', label: 'アポなし', color: 'badge-danger' },
+  { value: '通電', label: '通電', color: 'badge-success' },
+  { value: '不通', label: '不通', color: 'badge-warning' },
+  { value: '未入力', label: '未入力', color: 'badge-gray' },
+  { value: 'その他', label: 'その他', color: 'badge-gray' },
+]
+
+const LEAD_RESULT_OPTIONS: string[] = [
+  '新規リード',
+  'コンタクト試行中（折り返し含む）',
+  '商談獲得',
+  '失注（リサイクル対象外）',
+  '失注（リサイクル対象 A-E付与）',
+  '対象外（Disqualified）',
+  '連絡不能（Unreachable）',
+  '既存顧客（属性へ移行予定）',
+  '未入力',
 ]
 
 function getLocalDateString(date: Date = new Date()): string {
@@ -64,10 +77,25 @@ function formatLinkedDateYYMMDD(value?: string): string {
   return `${yy}${mm}${dd}`
 }
 
+/** 日付が今日かどうかを判定（架電リストの本日完了判定用） */
+function isDateToday(dateString: string | undefined | null): boolean {
+  if (!dateString) return false
+  const date = new Date(dateString)
+  const today = new Date()
+  return date.getFullYear() === today.getFullYear() &&
+         date.getMonth() === today.getMonth() &&
+         date.getDate() === today.getDate()
+}
+
 function formatLeadSourceShort(value?: string): string {
   if (!value) return '-'
   if (value === 'TEMPOS') return 'TP'
   return value
+}
+
+function normalizeStatusIs(value?: string): string {
+  if (!value) return ''
+  return value.replace(/^[0-9A-Za-z]+[.．]\s*/u, '').trim()
 }
 
 function compareValues(a: unknown, b: unknown): number {
@@ -134,26 +162,30 @@ const INITIAL_COLUMN_WIDTHS: Record<string, number> = {
   todayCallStatus: 70,
   status: 70,
   callStatusToday: 90,
-  statusIS: 200,
+  statusIS: 240,
   staffIS: 90,
   callCount: 80,
   quickActions: 280,
 
   linkedDate: 120,
-  leadSource: 100,
-  companyName: 200,
+  leadId: 120,
+  companyName: 133,
   contactName: 120,
   contactNameKana: 120,
   industry: 120,
   phone: 140,
   openingDate: 120,
-  contactPreferredDateTime: 150,
+  contactPreferredDateTime: 100,
   allianceRemarks: 200,
 }
 
 export default function CallsPage() {
   // UI状態（SSR対策：初期値はデフォルト、useEffectで復元）
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterLeadResult, setFilterLeadResult] = useState<string>('all')
+  const [filterLeadSource, setFilterLeadSource] = useState<string>('all')
+  const [filterStaff, setFilterStaff] = useState<string>('all')
+  const [filterTodayStatus, setFilterTodayStatus] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [dateRange, setDateRange] = useState<DateRange | null>(null)
   const [selectedRecord, setSelectedRecord] = useState<CallRecord | null>(null)
@@ -161,7 +193,9 @@ export default function CallsPage() {
   const [sortConfig, setSortConfig] = useState<SortConfig>(null)
   // フィルタの開閉状態（SSR対策：デフォルトtrue、useEffectで復元）
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(true)
-  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set())
+  const [isListMode, setIsListMode] = useState(false)
+  const [isCallListPanelOpen, setIsCallListPanelOpen] = useState(false)
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set(['allianceRemarks'])) // デフォルトで連携元備考を非表示
   const [requiredInputModal, setRequiredInputModal] = useState<null | { leadId: string; title: string; message: string }>(null)
   const autoFixInProgressRef = useRef(false)
   const topAreaRef = useRef<HTMLDivElement | null>(null)
@@ -196,6 +230,9 @@ export default function CallsPage() {
   const [callsPer10MinBlocksSnapshot, setCallsPer10MinBlocksSnapshot] = useState<number>(0)
   // 架電リスト機能（Phase 1）
   const [isCallListModalOpen, setIsCallListModalOpen] = useState(false)
+  // リード個別登録モーダル
+  const [isLeadRegisterModalOpen, setIsLeadRegisterModalOpen] = useState(false)
+  const [isLeadRegistering, setIsLeadRegistering] = useState(false)
   const [currentCallList, setCurrentCallList] = useState<CallList | null>(null)
   const [showCallListOnly, setShowCallListOnly] = useState(false)
   const [callListTargetCount, setCallListTargetCount] = useState<number | ''>(100) // 架電リスト作成時の件数上限（デフォルト100件）
@@ -254,11 +291,20 @@ export default function CallsPage() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem('calls.hiddenColumns')
-      if (!raw) return
+      if (!raw) {
+        // localStorageがない場合はデフォルト値を保存
+        window.localStorage.setItem('calls.hiddenColumns', JSON.stringify(['allianceRemarks']))
+        return
+      }
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed)) {
         // 仕様変更で「固定列」が増減しても破綻しないよう、保存値はhideableColumnsでフィルタする
         const filtered = parsed.map(String).filter((k) => hideableColumns.has(k))
+        // allianceRemarksがまだ含まれていない場合は追加（デフォルト非表示）
+        if (!filtered.includes('allianceRemarks')) {
+          filtered.push('allianceRemarks')
+          window.localStorage.setItem('calls.hiddenColumns', JSON.stringify(filtered))
+        }
         setHiddenColumns(new Set(filtered))
       }
     } catch {
@@ -340,6 +386,9 @@ export default function CallsPage() {
         if (typeof parsed.filterStatus === 'string') {
           setFilterStatus(parsed.filterStatus)
         }
+        if (typeof parsed.filterLeadResult === 'string') {
+          setFilterLeadResult(parsed.filterLeadResult)
+        }
         if (parsed.sortConfig && typeof parsed.sortConfig === 'object') {
           setSortConfig(parsed.sortConfig)
         }
@@ -417,6 +466,10 @@ export default function CallsPage() {
         sortConfig,
         columnWidths,
         filterStatus,
+        filterLeadResult,
+        filterLeadSource,
+        filterStaff,
+        filterTodayStatus,
         dateRange: dateRange ? {
           start: dateRange.start?.toISOString() ?? null,
           end: dateRange.end?.toISOString() ?? null,
@@ -427,7 +480,7 @@ export default function CallsPage() {
     } catch {
       // noop
     }
-  }, [isUiStateRestored, isHeaderCollapsed, sortConfig, columnWidths, filterStatus, dateRange])
+  }, [isUiStateRestored, isHeaderCollapsed, sortConfig, columnWidths, filterStatus, filterLeadResult, filterLeadSource, filterStaff, filterTodayStatus, dateRange])
 
   useEffect(() => {
     // 目標/稼働予定 復元
@@ -634,7 +687,7 @@ export default function CallsPage() {
   const hideableColumns = new Set([
     // 左側の基本情報
     'linkedDate',
-    'leadSource',
+    'leadId',
     'companyName',
     'industry',
     'contactName',
@@ -715,7 +768,7 @@ export default function CallsPage() {
     [
       // 基本情報
       'linkedDate',
-      'leadSource',
+      'leadId',
       'companyName',
       'industry',
       'contactName',
@@ -735,6 +788,22 @@ export default function CallsPage() {
       'openingDate',
       'allianceRemarks',
     ].filter(isColumnVisible).length + 1 // +1: クイックボタン（常時表示）
+
+  // テーブル幅を動的に計算（table-layout: fixedを有効にするため）
+  const tableWidth = useMemo(() => {
+    let width = columnWidths.quickActions // クイックボタンは常時表示
+    const columns: Array<keyof typeof columnWidths> = [
+      'linkedDate', 'leadId', 'companyName', 'industry', 'contactName', 'contactNameKana',
+      'phone', 'contactPreferredDateTime', 'staffIS', 'todayCallStatus', 'callCount',
+      'callStatusToday', 'statusIS', 'openingDate', 'allianceRemarks'
+    ]
+    for (const col of columns) {
+      if (!hiddenColumns.has(col)) {
+        width += columnWidths[col] || 0
+      }
+    }
+    return width
+  }, [columnWidths, hiddenColumns])
 
   // 架電リスト取得
   const { data: callListsData } = useQuery({
@@ -1175,19 +1244,115 @@ export default function CallsPage() {
     }
   }, [callListView, staffForCallList, todayCallList, previousCallList])
 
+  // リードソースの動的選択肢を生成（OMC, HOCT SYSTEM, TEMPOSを先頭に）
+  const leadSourceOptions = useMemo(() => {
+    const allRecords = data?.data as CallRecord[] || []
+    const sources = new Set<string>()
+    allRecords.forEach(r => {
+      const val = String(r.leadSource || '').trim()
+      if (val) sources.add(val)
+    })
+    // 優先順序: OMC, HOCT SYSTEM, TEMPOS、その後アルファベット順
+    const priority = ['OMC', 'HOCT SYSTEM', 'TEMPOS']
+    const prioritySources = priority.filter(p => sources.has(p))
+    const otherSources = Array.from(sources).filter(s => !priority.includes(s)).sort()
+    return [...prioritySources, ...otherSources]
+  }, [data])
+
+  // 担当者の動的選択肢を生成
+  const staffFilterOptions = useMemo(() => {
+    const allRecords = data?.data as CallRecord[] || []
+    const staffSet = new Set<string>()
+    allRecords.forEach(r => {
+      const val = String(r.staffIS || '').trim()
+      if (val) staffSet.add(val)
+    })
+    return Array.from(staffSet).sort()
+  }, [data])
+
+  // 「その他」の担当者リストを生成（田邊、沢田、金山以外）
+  const otherStaffOptions = useMemo(() => {
+    const mainStaffList = ['\u7530\u908a', '沢田', '金山'] // 田邊（U+7530 U+908A）
+    return staffFilterOptions.filter(staff => !mainStaffList.includes(staff))
+  }, [staffFilterOptions])
+
   const filteredRecords = (data?.data as CallRecord[] || []).filter(record => {
     // 共通フィルタ: ステータス + 検索（両モードで有効）
-    const matchesStatus = filterStatus === 'all' || record.status === filterStatus
+    const callResult = String(record.callStatusToday || record.resultContactStatus || '').trim()
+    const normalizedStatusIs = normalizeStatusIs(String(record.statusIS || '').trim())
+    let matchesStatus = filterStatus === 'all'
+    if (filterStatus === '不通') {
+      // 不通フィルタ: 不通、不通2、未通、未通電なども含める
+      matchesStatus = /^(不通|未通)\d*$/.test(callResult) || callResult === '未通電'
+    } else if (filterStatus === '通電') {
+      matchesStatus = callResult === '通電'
+    } else if (filterStatus === '未架電') {
+      const isNewLead = normalizedStatusIs === '新規リード'
+      matchesStatus = isNewLead && callResult === '未架電'
+    } else if (filterStatus === '未入力') {
+      // 架電結果が空欄のもの
+      matchesStatus = callResult === ''
+    } else if (filterStatus === 'その他') {
+      // 通電/不通/未架電（新規リード）/未入力のいずれでもないもの
+      const isNotsu = /^(不通|未通)\d*$/.test(callResult) || callResult === '未通電'
+      const isTsuden = callResult === '通電'
+      const isNewLeadMikaden = normalizedStatusIs === '新規リード' && callResult === '未架電'
+      const isEmpty = callResult === ''
+      matchesStatus = !isNotsu && !isTsuden && !isNewLeadMikaden && !isEmpty
+    } else if (filterStatus !== 'all') {
+      matchesStatus = record.status === filterStatus
+    }
+
+    // リード結果フィルタ（未入力対応）
+    let matchesLeadResult = filterLeadResult === 'all'
+    if (filterLeadResult === '未入力') {
+      matchesLeadResult = normalizedStatusIs === ''
+    } else if (filterLeadResult !== 'all') {
+      matchesLeadResult = normalizedStatusIs === filterLeadResult
+    }
+    
     const matchesSearch = searchTerm === '' || 
       record.companyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       record.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       record.phone.includes(searchTerm) ||
       record.leadId.toLowerCase().includes(searchTerm.toLowerCase())
     
+    // リードソースフィルタ（未入力対応）
+    const leadSourceValue = String(record.leadSource || '').trim()
+    let matchesLeadSource = filterLeadSource === 'all'
+    if (filterLeadSource === '未入力') {
+      matchesLeadSource = leadSourceValue === ''
+    } else if (filterLeadSource !== 'all') {
+      matchesLeadSource = leadSourceValue === filterLeadSource
+    }
+    
+    // 担当者フィルタ（未入力対応・その他対応）
+    const staffISValue = String(record.staffIS || '').trim()
+    const mainStaffList = ['\u7530\u908a', '沢田', '金山'] // 田邊（U+7530 U+908A）
+    let matchesStaff = filterStaff === 'all'
+    if (filterStaff === '未入力') {
+      matchesStaff = staffISValue === ''
+    } else if (filterStaff === 'その他') {
+      // 田邊/沢田/金山/未入力以外
+      matchesStaff = staffISValue !== '' && !mainStaffList.includes(staffISValue)
+    } else if (filterStaff !== 'all') {
+      matchesStaff = staffISValue === filterStaff
+    }
+    
+    // 本日完了/未了フィルタ
+    // ★ endedAtが今日の日付の場合のみ「本日完了」として扱う（翌日リセット）
+    let matchesTodayStatus = filterTodayStatus === 'all'
+    if (filterTodayStatus === '本日完了') {
+      matchesTodayStatus = record.todayCallStatus === '済' && isDateToday(record.endedAt)
+    } else if (filterTodayStatus === '本日未了') {
+      // 本日未了: todayCallStatusが未了（済以外）
+      matchesTodayStatus = record.todayCallStatus !== '済' && record.todayCallStatus != null
+    }
+    
     // ★ リスト表示モード: リスト内 + 検索 + ステータス（期間フィルタは無視）
     if (showCallListOnly && currentCallList) {
       const isInList = currentCallList.leadIds.includes(record.leadId)
-      return isInList && matchesStatus && matchesSearch
+      return isInList && matchesStatus && matchesLeadResult && matchesSearch && matchesLeadSource && matchesStaff && matchesTodayStatus
     }
 
     // ★ 通常モード（分析用）: 期間フィルタ + 検索 + ステータス + 担当者
@@ -1206,7 +1371,16 @@ export default function CallsPage() {
         ? true
         : selectedStaffScope.has(staffValue)
     
-    return matchesStatus && matchesSearch && matchesDateRange && matchesStaffScope
+    return (
+      matchesStatus &&
+      matchesLeadResult &&
+      matchesSearch &&
+      matchesDateRange &&
+      matchesStaffScope &&
+      matchesLeadSource &&
+      matchesStaff &&
+      matchesTodayStatus
+    )
   })
 
   const sortedRecords = useMemo(() => {
@@ -1236,13 +1410,23 @@ export default function CallsPage() {
     }
 
     const withIndex = filteredRecords.map((record, idx) => ({ record, idx }))
-    withIndex.sort((a, b) => {
-      // まず状態優先度でソート
-      const priorityA = getStatusPriority(a.record)
-      const priorityB = getStatusPriority(b.record)
-      if (priorityA !== priorityB) return priorityA - priorityB
+    const isCallListMode = showCallListOnly && currentCallList
 
-      // 同じ優先度内では、sortConfigによるソート
+    withIndex.sort((a, b) => {
+      if (isCallListMode) {
+        // 本日/前回リストは優先度ロジックを維持
+        const priorityA = getStatusPriority(a.record)
+        const priorityB = getStatusPriority(b.record)
+        if (priorityA !== priorityB) return priorityA - priorityB
+      } else {
+        // 通常時は連携日順（降順）で並べる
+        const aDate = a.record.linkedDate ? parseDateLike(String(a.record.linkedDate)) : null
+        const bDate = b.record.linkedDate ? parseDateLike(String(b.record.linkedDate)) : null
+        const cmpDate = compareValues(aDate, bDate)
+        if (cmpDate !== 0) return -cmpDate
+      }
+
+      // 同じ優先度/同じ日付内では、sortConfigによるソート
       if (sortConfig) {
         const { key, direction } = sortConfig
         const isDateKey = key === 'linkedDate' || key === 'nextActionDate' || key === 'lastCalledDate' || key === 'statusUpdateDate'
@@ -1261,43 +1445,35 @@ export default function CallsPage() {
     })
 
     return withIndex.map(x => x.record)
-  }, [filteredRecords, sortConfig])
+  }, [filteredRecords, sortConfig, showCallListOnly, currentCallList])
 
   const kpi = useMemo(() => {
     const rows = filteredRecords
 
     const completed = rows.filter((r) => r.todayCallStatus === '済')
-    const getCallResult = (r: CallRecord): string => String(r.callStatusToday || r.resultContactStatus || '')
+    const normalizeRecentResult = (value?: string): string => {
+      const trimmed = String(value || '').trim()
+      if (trimmed === '未通' || trimmed === '未通電') return '不通'
+      return trimmed
+    }
+    const getCallResult = (r: CallRecord): string => normalizeRecentResult(r.resultContactStatus)
     const isConnected = (r: CallRecord) => getCallResult(r) === '通電'
-    // 商談獲得判定: status または statusIS に「商談獲得」「アポイント獲得」「アポ獲得」が含まれる
+    // 商談獲得判定: statusISが「商談獲得」または statusが「商談獲得」
     const isAppointment = (r: CallRecord) => {
       const status = String(r.status || '')
       const statusIS = String(r.statusIS || '')
-      return (
-        status === '03.アポイント獲得済' ||
-        status === '09.アポ獲得' ||
-        statusIS.includes('商談獲得') ||
-        statusIS.includes('アポイント獲得') ||
-        statusIS.includes('アポ獲得')
-      )
+      return status === '商談獲得' || statusIS.includes('商談獲得')
     }
 
-    // 架電数 = 不通/通電ボタン押下時にカウント（callStatusTodayから計算）
-    // - 不通X → Xをカウント（例：不通3 → 3回）
-    // - 通電 → 1をカウント
-    // - filteredRecords全体で計算（完了かどうかに関係なく）
-    const getTodayCallCount = (r: CallRecord): number => {
-      const result = String(r.callStatusToday || '').trim()
-      if (!result || result === '未架電') return 0
-      // 不通X形式をチェック（不通1, 不通2, 不通3, ...）
-      const noAnswerMatch = /^不通(\d+)$/.exec(result)
-      if (noAnswerMatch) return Math.max(1, Number(noAnswerMatch[1]))
-      // 通電は1回
-      if (result === '通電') return 1
-      // その他（不通のみ、架電中など）は0
-      return 0
-    }
+    // 架電数 = call_countフィールドの合計（filteredRecords全体）
+    // call_countは各リードの総架電回数を表すため、これを合計することで全体の架電数を算出
+    const callCount = rows.reduce((sum, r) => {
+      const count = Number(r.callCount) || 0
+      return sum + count
+    }, 0)
+    
     // 不通回数を取得（通電以外の架電回数）
+    // callStatusTodayから「不通X」形式をパース（当日の不通回数）
     const getTodayNoAnswerCount = (r: CallRecord): number => {
       const result = String(r.callStatusToday || '').trim()
       if (!result || result === '未架電') return 0
@@ -1305,19 +1481,10 @@ export default function CallsPage() {
       if (noAnswerMatch) return Math.max(1, Number(noAnswerMatch[1]))
       return 0
     }
-    const callCount = rows.reduce((sum, r) => sum + getTodayCallCount(r), 0)
-    // 通電数 = callStatusTodayが「通電」のレコード数（rows全体）
-    const connectedCount = rows.filter((r) => String(r.callStatusToday || '').trim() === '通電').length
-    // 不通数（リード数） = callStatusTodayが「不通」または「不通X」形式のレコード数
-    const notConnectedCount = rows.filter((r) => {
-      const result = String(r.callStatusToday || '').trim()
-      return /^不通\d*$/.test(result)
-    }).length
-    // 未架電数 = callStatusTodayが空または「未架電」のレコード数
-    const notCalledCount = rows.filter((r) => {
-      const result = String(r.callStatusToday || '').trim()
-      return !result || result === '未架電'
-    }).length
+    // 通電数/不通数/未架電数は result_contact_status を正とする
+    const connectedCount = rows.filter((r) => getCallResult(r) === '通電').length
+    const notConnectedCount = rows.filter((r) => getCallResult(r) === '不通').length
+    const notCalledCount = rows.filter((r) => getCallResult(r) === '未架電').length
     // 商談獲得数 = filteredRecords全体でカウント（完了かどうかに関係なく）
     const appointmentCount = rows.filter(isAppointment).length
 
@@ -1401,9 +1568,8 @@ export default function CallsPage() {
         ? connectedDurations.reduce((sum, n) => sum + n, 0) / connectedDurations.length
         : null
 
-    const connectedAppointmentCount = completed.filter((r) => isConnected(r) && isAppointment(r)).length
     const connectedAppointmentRate =
-      connectedCount > 0 ? connectedAppointmentCount / connectedCount : null
+      connectedCount > 0 ? appointmentCount / connectedCount : null
 
     const formatSecondsAsMmSs = (sec: number | null) => {
       if (sec === null) return '-'
@@ -1431,17 +1597,11 @@ export default function CallsPage() {
 
   const getCallResult = (r: CallRecord): string => String(r.callStatusToday || r.resultContactStatus || '')
   const isConnected = (r: CallRecord) => getCallResult(r) === '通電'
-  // 商談獲得判定: status または statusIS に「商談獲得」「アポイント獲得」「アポ獲得」が含まれる（KPI計算と同じ条件）
+  // 商談獲得判定: statusISが「商談獲得」または statusが「商談獲得」（KPI計算と同じ条件）
   const isAppointment = (r: CallRecord) => {
     const status = String(r.status || '')
     const statusIS = String(r.statusIS || '')
-    return (
-      status === '03.アポイント獲得済' ||
-      status === '09.アポ獲得' ||
-      statusIS.includes('商談獲得') ||
-      statusIS.includes('アポイント獲得') ||
-      statusIS.includes('アポ獲得')
-    )
+    return status === '商談獲得' || statusIS.includes('商談獲得')
   }
   const getConnectedDurationSeconds = (r: CallRecord) => {
     const sec = Number((r as any).lastConnectedDurationSeconds)
@@ -1738,9 +1898,8 @@ export default function CallsPage() {
     e?.stopPropagation()
     if (warnIfInProgressExists('noAnswer', record)) return
     // 不通は「自動終了しない」：不通1/不通2…として累積し、手動で終了ボタンを押す
-    const prev = String(record.callStatusToday || '').trim()
-    const m = /^不通(\d+)$/.exec(prev)
-    const nextCount = m ? Math.max(1, Number(m[1]) + 1) : 1
+    // 架電回数（call_count）+ 1 を不通回数として使用（履歴件数と同期）
+    const nextCount = (record.callCount || 0) + 1
     const nextLabel = `不通${nextCount}`
 
     const now = new Date()
@@ -1758,7 +1917,7 @@ export default function CallsPage() {
           callDate: nowDate,
           callTime: nowTime,
           staffIS: record.staffIS || record.callingStaffIS || '',
-          status: '不通',
+          status: nextLabel,
           duration: null,
           memo: '',
         }),
@@ -1768,9 +1927,9 @@ export default function CallsPage() {
     }
 
     const updates: Partial<CallRecord> = {
-      status: '架電中',
+      status: '不通',
       callStatusToday: nextLabel as any,
-      resultContactStatus: '不通',
+      resultContactStatus: nextLabel,
       lastCalledDate: nowDate,
       // 進行中情報は維持
       callingStartedAt: record.callingStartedAt || nowIso,
@@ -2025,10 +2184,51 @@ export default function CallsPage() {
             </div>
             <button
               type="button"
-              onClick={() => setIsHeaderCollapsed(prev => !prev)}
-              className="px-4 py-2 text-sm font-medium text-primary-800 bg-primary-100 border border-primary-200 rounded-md hover:bg-primary-200 shadow-sm"
+              onClick={() => {
+                setIsHeaderCollapsed(prev => {
+                  const next = !prev
+                  if (next) {
+                    // 架電モードON時: フィルタをデフォルトにリセット（担当者スコープは維持）
+                    setIsListMode(false)
+                    setFilterStatus('all')
+                    setFilterLeadResult('all')
+                    setFilterLeadSource('all')
+                    setFilterTodayStatus('all')
+                    setSearchTerm('')
+                    setDateRange(null)
+                  }
+                  return next
+                })
+              }}
+              className={`px-4 py-2 text-sm font-medium border rounded-md shadow-sm ${
+                isHeaderCollapsed
+                  ? 'text-white bg-primary-600 border-primary-600 hover:bg-primary-700'
+                  : 'text-primary-700 bg-primary-50 border-primary-100 hover:bg-primary-100'
+              }`}
             >
-              {isHeaderCollapsed ? 'Open' : 'Close'}
+              {isHeaderCollapsed ? '架電モードON' : '架電モードOFF'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsListMode(prev => {
+                  const next = !prev
+                  if (next) {
+                    setIsHeaderCollapsed(false)
+                    setShowCallListOnly(false)
+                    setIsSelectionMode(false)
+                    setSelectedLeadIds(new Set())
+                  }
+                  return next
+                })
+              }}
+              className={`px-4 py-2 text-sm font-medium border rounded-md shadow-sm ${
+                isListMode
+                  ? 'text-white bg-primary-600 border-primary-600 hover:bg-primary-700'
+                  : 'text-primary-700 bg-primary-50 border-primary-100 hover:bg-primary-100'
+              }`}
+            >
+              {isListMode ? 'リストモードON' : 'リストモードOFF'}
             </button>
             <button
               type="button"
@@ -2054,6 +2254,7 @@ export default function CallsPage() {
                     <DateRangeFilter
                       value={dateRange}
                       onChange={setDateRange}
+                      fiscalYearStart={7}
                     />
                   </div>
                   <span className="text-sm text-gray-600 whitespace-nowrap">
@@ -2062,24 +2263,24 @@ export default function CallsPage() {
                 </div>
 
                 {/* 検索/フィルタ（縦幅削減のため右横に集約） */}
-                <div className="flex flex-col sm:flex-row gap-3 lg:justify-end lg:items-center">
-                  <div className="sm:w-[360px] lg:w-[360px]">
+                <div className="flex flex-col sm:flex-row flex-wrap lg:flex-nowrap gap-2 lg:justify-end lg:items-center">
+                  <div className="sm:w-[160px] lg:w-[160px]">
                     <input
                       type="text"
-                      placeholder="会社名、担当者名、電話番号、リードIDで検索..."
+                      placeholder="会社名、電話番号..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="input w-full"
+                      className="input w-full text-sm"
                     />
                   </div>
-                  <div className="sm:w-52 lg:w-52">
+                  <div className="sm:w-28 lg:w-28">
                     <select
                       value={filterStatus}
                       onChange={(e) => setFilterStatus(e.target.value)}
-                      className="input w-full"
+                      className="input w-full text-sm"
                       aria-label="ステータスフィルター"
                     >
-                      <option value="all">すべてのステータス</option>
+                      <option value="all">ステータス</option>
                       {STATUS_OPTIONS.map(option => (
                         <option key={option.value} value={option.value}>
                           {option.label}
@@ -2087,306 +2288,428 @@ export default function CallsPage() {
                       ))}
                     </select>
                   </div>
+                  <div className="sm:w-36 lg:w-36">
+                    <select
+                      value={filterLeadResult}
+                      onChange={(e) => setFilterLeadResult(e.target.value)}
+                      className="input w-full text-sm"
+                      aria-label="リード結果フィルター"
+                    >
+                      <option value="all">リード結果</option>
+                      {LEAD_RESULT_OPTIONS.map(option => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:w-28 lg:w-28">
+                    <select
+                      value={filterLeadSource}
+                      onChange={(e) => setFilterLeadSource(e.target.value)}
+                      className="input w-full text-sm"
+                      aria-label="リードソースフィルター"
+                    >
+                      <option value="all">リードソース</option>
+                      {leadSourceOptions.map(source => (
+                        <option key={source} value={source}>{source}</option>
+                      ))}
+                      <option value="未入力">未入力</option>
+                    </select>
+                  </div>
+                  <div className="sm:w-24 lg:w-24">
+                    <select
+                      value={filterStaff}
+                      onChange={(e) => setFilterStaff(e.target.value)}
+                      className="input w-full text-sm"
+                      aria-label="担当者フィルター"
+                    >
+                      <option value="all">担当者</option>
+                      <option value={'\u7530\u908a'}>{'\u7530\u908a'}</option>
+                      <option value="沢田">沢田</option>
+                      <option value="金山">金山</option>
+                      <option value="その他">その他（全員）</option>
+                      <option value="未入力">未入力</option>
+                    </select>
+                  </div>
+                  <div className="sm:w-28 lg:w-28">
+                    <select
+                      value={filterTodayStatus}
+                      onChange={(e) => setFilterTodayStatus(e.target.value)}
+                      className="input w-full text-sm"
+                      aria-label="本日完了/未了フィルター"
+                    >
+                      <option value="all">本日状態</option>
+                      <option value="本日完了">本日完了</option>
+                      <option value="本日未了">本日未了</option>
+                    </select>
+                  </div>
+                  {/* フィルタリセットボタン */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterStatus('all')
+                      setFilterLeadResult('all')
+                      setFilterLeadSource('all')
+                      setFilterStaff('all')
+                      setFilterTodayStatus('all')
+                      setSearchTerm('')
+                      setDateRange(null)
+                    }}
+                    className="p-1.5 text-gray-600 bg-gray-200 border border-gray-300 rounded shadow hover:bg-gray-300 hover:text-gray-800 hover:shadow-md active:shadow-inner transition-all"
+                    title="フィルタをリセット"
+                    aria-label="フィルタをリセット"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* 架電リスト機能（Phase 1） */}
-            <div className="card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700">架電リスト</span>
-                    {/* 3状態ボタン: 選択中=濃青背景白文字, アクティブ=白背景青文字青枠hover青薄背景, 非アクティブ=グレー背景薄文字 */}
-                    <div className="inline-flex rounded-md overflow-hidden gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          callListViewUserSetRef.current = true
-                          setCallListView('today')
-                        }}
-                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150 ${
-                          callListView === 'today'
-                            ? 'bg-primary-600 text-white'
-                            : 'bg-white text-primary-600 border-2 border-primary-300 hover:bg-primary-50 hover:border-primary-400'
-                        }`}
-                      >
-                        本日
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          callListViewUserSetRef.current = true
-                          setCallListView('previous')
-                        }}
-                        disabled={!previousCallList}
-                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150 ${
-                          !previousCallList
-                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                            : callListView === 'previous'
-                              ? 'bg-primary-600 text-white'
-                              : 'bg-white text-primary-600 border-2 border-primary-300 hover:bg-primary-50 hover:border-primary-400'
-                        }`}
-                        title="前回（直近の過去リスト）を表示"
-                      >
-                        前回
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      value={callListTargetCount}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        if (val === '') {
-                          setCallListTargetCount('')
-                        } else {
-                          const num = parseInt(val, 10)
-                          if (!isNaN(num) && num >= 0) {
-                            setCallListTargetCount(num)
-                          }
-                        }
-                      }}
-                      className="w-16 px-2 py-2 text-sm border border-gray-300 rounded-md text-center"
-                      placeholder="件数"
-                      min={0}
-                    />
-                    <span className="text-sm text-gray-600">件</span>
-                  </div>
-                  <button
-                    onClick={handleCreateTodayList}
-                    disabled={!!todayCallList}
-                    className={`px-4 py-2 text-sm font-medium rounded-md ${
-                      todayCallList
-                        ? 'text-white bg-gray-400 cursor-not-allowed opacity-70'
-                        : 'text-white bg-primary-600 hover:bg-primary-700'
-                    }`}
-                    title={
-                      todayCallList
-                        ? '本日のリストは作成済みです（追加は「+追加作成」、作り直しは⚙️から）'
-                        : isCallListStaffReady
-                          ? '本日の架電リストを作成します'
-                          : '担当者フィルタの「すべて」を外し、担当者を1名選択してください'
-                    }
-                  >
-                    新規作成
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (!isCallListStaffReady) {
-                        alert('担当者を1名選択してください。（担当者フィルタの「すべて」を外して選択してください）')
-                        return
-                      }
-                      if (callListView !== 'today') {
-                        alert('追加作成は本日のリストで実施してください。（本日タブに切り替えてください）')
-                        return
-                      }
-                      if (!todayCallList) {
-                        alert('追加対象の本日リストがありません。先に新規作成してください。')
-                        return
-                      }
-                      handleAddToList()
-                    }}
-                    className={`px-4 py-2 text-sm font-medium rounded-md ${
-                      isCallListStaffReady && callListView === 'today' && todayCallList
-                        ? 'text-white bg-green-600 hover:bg-green-700'
-                        : 'text-white bg-gray-400 hover:bg-gray-400 cursor-not-allowed opacity-70'
-                    }`}
-                    title={
-                      !isCallListStaffReady
-                        ? '担当者を1名選択してください'
-                        : callListView === 'today'
-                          ? '本日のリストにリードを追加します'
-                          : '本日のタブでのみ利用できます'
-                    }
-                  >
-                    +追加作成
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (!isCallListStaffReady) {
-                        alert('担当者を1名選択してください。（担当者フィルタの「すべて」を外して選択してください）')
-                        return
-                      }
-                      if (callListView !== 'today') {
-                        alert('リスト選択は本日のリストでのみ利用できます。（本日タブに切り替えてください）')
-                        return
-                      }
-                      if (!currentCallList) {
-                        alert('対象のリストがありません。先に新規作成してください。')
-                        return
-                      }
-                      if (isSelectionMode) {
-                        // 非表示モード → 選択されたリードを除外
-                        if (selectedLeadIds.size > 0) {
-                          try {
-                            const response = await fetch('/api/call-lists', {
-                              method: 'PATCH',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                id: currentCallList.id,
-                                removeLeadIds: Array.from(selectedLeadIds),
-                              }),
-                            })
-                            if (response.ok) {
-                              const result = await response.json()
-                              // リストを更新
-                              setCurrentCallList({
-                                ...currentCallList,
-                                leadIds: result.leadIds || [],
-                              })
-                              alert(`${selectedLeadIds.size}件のリードを架電リストから除外しました。`)
-                            } else {
-                              alert('除外に失敗しました。')
-                            }
-                          } catch {
-                            alert('除外に失敗しました。')
-                          }
-                        }
-                        // 選択をクリアして通常モードに戻る
-                        setSelectedLeadIds(new Set())
-                        setIsSelectionMode(false)
-                      } else {
-                        // 通常モード → 選択モードに切り替え
-                        setIsSelectionMode(true)
-                      }
-                    }}
-                    className={`px-4 py-2 text-sm font-medium rounded-md ${
-                      isCallListStaffReady && callListView === 'today' && currentCallList
-                        ? isSelectionMode
-                          ? 'text-white bg-red-600 hover:bg-red-700'
-                          : 'text-white bg-gray-500 hover:bg-gray-600'
-                        : 'text-white bg-gray-400 hover:bg-gray-400 cursor-not-allowed opacity-70'
-                    }`}
-                    title={
-                      !isCallListStaffReady
-                        ? '担当者を1名選択してください'
-                        : callListView === 'today'
-                          ? 'リードを選択して非表示（除外）できます'
-                          : '本日のタブでのみ利用できます'
-                    }
-                  >
-                    {isSelectionMode ? `非表示 (${selectedLeadIds.size}件)` : 'リスト選択'}
-                  </button>
-                  {!isCallListStaffReady && (
-                    <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded">
-                      架電リスト機能は担当者を1名選択してください
-                    </span>
-                  )}
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={showCallListOnly}
-                      onChange={(e) => setShowCallListOnly(e.target.checked)}
-                      className="rounded"
-                    />
-                    <span className="text-sm text-gray-700">
-                      {callListView === 'today' ? '本日の架電リストのみ表示' : '前回リストのみ表示'}
-                    </span>
-                  </label>
-                  {currentCallList && (
-                    <span className="text-xs text-gray-500">
-                      リスト名: {currentCallList.name} | 作成日: {currentCallList.date}
-                    </span>
-                  )}
-                </div>
-                {currentCallList && (
-                  <div className="flex items-center gap-2">
-                    <div className="text-sm text-gray-600">
-                      {callListView === 'today' ? '本日の架電リスト' : '前回リスト'}: {currentCallList.leadIds.length}件
-                    </div>
-                    {/* 設定アイコン（リスト再作成等） */}
-                    <div className="relative">
-                      <button
-                        onClick={() => setIsListSettingsOpen(!isListSettingsOpen)}
-                        className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
-                        title="リスト設定"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                      </button>
-                      {isListSettingsOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-10"
-                            onClick={() => setIsListSettingsOpen(false)}
-                          />
-                          <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-20">
-                            <button
-                              onClick={handleRecreateList}
-                              disabled={!isCallListStaffReady}
-                              className={`w-full px-4 py-2 text-left text-sm border-b border-gray-100 ${
-                                isCallListStaffReady
-                                  ? 'text-red-600 hover:bg-red-50'
-                                  : 'text-gray-400 cursor-not-allowed'
-                              }`}
-                            >
-                              🔄 リスト再作成（上書き）
-                            </button>
-                            <button
-                              onClick={handleClearList}
-                              disabled={!todayCallList}
-                              className={`w-full px-4 py-2 text-left text-sm ${
-                                todayCallList
-                                  ? 'text-red-600 hover:bg-red-50'
-                                  : 'text-gray-400 cursor-not-allowed'
-                              }`}
-                            >
-                              🗑️ リストクリア
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
           </>
         )}
       </div>
 
-      {/* 架電タイマー（常時表示 / Close範囲外） */}
-      <div className="mt-4">
-        <div className="card p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+      {/* 架電リスト機能（Phase 1） */}
+      {!isListMode && isCallListPanelOpen && (
+        <div className={`card p-4 ${isHeaderCollapsed ? 'mt-4' : ''}`}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
-                  onClick={() => {
-                    setSettingsModal({ type: 'goalCallCount' })
-                    setSettingsValue(goalCallCount === null ? '' : String(goalCallCount))
-                  }}
-                >
-                  目標架電数
-                </button>
-                <button
-                  type="button"
-                  className="px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
-                  onClick={() => {
-                    setSettingsModal({ type: 'goalDealCount' })
-                    setSettingsValue(goalDealCount === null ? '' : String(goalDealCount))
-                  }}
-                >
-                  目標商談獲得数
-                </button>
-                <button
-                  type="button"
-                  className="px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
-                  onClick={() => {
-                    setSettingsModal({ type: 'plannedWorkHours' })
-                    setSettingsValue(plannedWorkHours === null ? '' : String(plannedWorkHours))
-                  }}
-                >
-                  稼働予定時間
-                </button>
+                <span className="text-sm font-medium text-gray-700">架電リスト</span>
+                {/* 3状態ボタン: 選択中=濃青背景白文字, アクティブ=白背景青文字青枠hover青薄背景, 非アクティブ=グレー背景薄文字 */}
+                <div className="inline-flex rounded-md overflow-hidden gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      callListViewUserSetRef.current = true
+                      setCallListView('today')
+                    }}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150 ${
+                      callListView === 'today'
+                        ? 'bg-primary-600 text-white'
+                        : 'bg-white text-primary-600 border-2 border-primary-300 hover:bg-primary-50 hover:border-primary-400'
+                    }`}
+                  >
+                    本日
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      callListViewUserSetRef.current = true
+                      setCallListView('previous')
+                    }}
+                    disabled={!previousCallList}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150 ${
+                      !previousCallList
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : callListView === 'previous'
+                          ? 'bg-primary-600 text-white'
+                          : 'bg-white text-primary-600 border-2 border-primary-300 hover:bg-primary-50 hover:border-primary-400'
+                    }`}
+                    title="前回（直近の過去リスト）を表示"
+                  >
+                    前回
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 md:ml-6">
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  value={callListTargetCount}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '') {
+                      setCallListTargetCount('')
+                    } else {
+                      const num = parseInt(val, 10)
+                      if (!isNaN(num) && num >= 0) {
+                        setCallListTargetCount(num)
+                      }
+                    }
+                  }}
+                  className="w-16 px-2 py-2 text-sm border border-gray-300 rounded-md text-center"
+                  placeholder="件数"
+                  min={0}
+                />
+                <span className="text-sm text-gray-600">件</span>
+              </div>
+              <button
+                onClick={handleCreateTodayList}
+                disabled={!!todayCallList}
+                className={`px-4 py-2 text-sm font-medium rounded-md ${
+                  todayCallList
+                    ? 'text-white bg-gray-400 cursor-not-allowed opacity-70'
+                    : 'text-white bg-primary-600 hover:bg-primary-700'
+                }`}
+                title={
+                  todayCallList
+                    ? '本日のリストは作成済みです（追加は「+追加作成」、作り直しは⚙️から）'
+                    : isCallListStaffReady
+                      ? '本日の架電リストを作成します'
+                      : '担当者フィルタの「すべて」を外し、担当者を1名選択してください'
+                }
+              >
+                新規作成
+              </button>
+              <button
+                onClick={() => {
+                  if (!isCallListStaffReady) {
+                    alert('担当者を1名選択してください。（担当者フィルタの「すべて」を外して選択してください）')
+                    return
+                  }
+                  if (callListView !== 'today') {
+                    alert('追加作成は本日のリストで実施してください。（本日タブに切り替えてください）')
+                    return
+                  }
+                  if (!todayCallList) {
+                    alert('追加対象の本日リストがありません。先に新規作成してください。')
+                    return
+                  }
+                  handleAddToList()
+                }}
+                className={`px-4 py-2 text-sm font-medium rounded-md ${
+                  isCallListStaffReady && callListView === 'today' && todayCallList
+                    ? 'text-white bg-green-600 hover:bg-green-700'
+                    : 'text-white bg-gray-400 hover:bg-gray-400 cursor-not-allowed opacity-70'
+                }`}
+                title={
+                  !isCallListStaffReady
+                    ? '担当者を1名選択してください'
+                    : callListView === 'today'
+                      ? '本日のリストにリードを追加します'
+                      : '本日のタブでのみ利用できます'
+                }
+              >
+                +追加作成
+              </button>
+              <button
+                onClick={async () => {
+                  if (!isCallListStaffReady) {
+                    alert('担当者を1名選択してください。（担当者フィルタの「すべて」を外して選択してください）')
+                    return
+                  }
+                  if (callListView !== 'today') {
+                    alert('リスト選択は本日のリストでのみ利用できます。（本日タブに切り替えてください）')
+                    return
+                  }
+                  if (!currentCallList) {
+                    alert('対象のリストがありません。先に新規作成してください。')
+                    return
+                  }
+                  if (isSelectionMode) {
+                    // 非表示モード → 選択されたリードを除外
+                    if (selectedLeadIds.size > 0) {
+                      try {
+                        const response = await fetch('/api/call-lists', {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            id: currentCallList.id,
+                            removeLeadIds: Array.from(selectedLeadIds),
+                          }),
+                        })
+                        if (response.ok) {
+                          const result = await response.json()
+                          // リストを更新
+                          setCurrentCallList({
+                            ...currentCallList,
+                            leadIds: result.leadIds || [],
+                          })
+                          alert(`${selectedLeadIds.size}件のリードを架電リストから除外しました。`)
+                        } else {
+                          alert('除外に失敗しました。')
+                        }
+                      } catch {
+                        alert('除外に失敗しました。')
+                      }
+                    }
+                    // 選択をクリアして通常モードに戻る
+                    setSelectedLeadIds(new Set())
+                    setIsSelectionMode(false)
+                  } else {
+                    // 通常モード → 選択モードに切り替え
+                    setIsSelectionMode(true)
+                  }
+                }}
+                className={`px-4 py-2 text-sm font-medium rounded-md ${
+                  isCallListStaffReady && callListView === 'today' && currentCallList
+                    ? isSelectionMode
+                      ? 'text-white bg-red-600 hover:bg-red-700'
+                      : 'text-white bg-gray-500 hover:bg-gray-600'
+                  : 'text-white bg-gray-400 hover:bg-gray-400 cursor-not-allowed opacity-70'
+                }`}
+                title={
+                  !isCallListStaffReady
+                    ? '担当者を1名選択してください'
+                    : callListView === 'today'
+                      ? 'リードを選択して非表示（除外）できます'
+                      : '本日のタブでのみ利用できます'
+                }
+              >
+                {isSelectionMode ? `非表示 (${selectedLeadIds.size}件)` : 'リスト選択'}
+              </button>
+              {!isCallListStaffReady && (
+                <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded">
+                  架電リスト機能は担当者を1名選択してください
+                </span>
+              )}
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={showCallListOnly}
+                  onChange={(e) => setShowCallListOnly(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="text-sm text-gray-700">
+                  {callListView === 'today' ? '本日の架電リストのみ表示' : '前回リストのみ表示'}
+                </span>
+              </label>
+              {currentCallList && (
+                <span className="text-xs text-gray-500">
+                  リスト名: {currentCallList.name} | 作成日: {currentCallList.date}
+                </span>
+              )}
+            </div>
+            {currentCallList && (
+              <div className="flex items-center gap-2">
+                <div className="text-sm text-gray-600">
+                  {callListView === 'today' ? '本日の架電リスト' : '前回リスト'}: {currentCallList.leadIds.length}件
+                </div>
+                {/* 設定アイコン（リスト再作成等） */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsListSettingsOpen(!isListSettingsOpen)}
+                    className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                    title="リスト設定"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
+                  {isListSettingsOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setIsListSettingsOpen(false)}
+                      />
+                      <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-20">
+                        <button
+                          onClick={handleRecreateList}
+                          disabled={!isCallListStaffReady}
+                          className={`w-full px-4 py-2 text-left text-sm border-b border-gray-100 ${
+                            isCallListStaffReady
+                              ? 'text-red-600 hover:bg-red-50'
+                              : 'text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          🔄 リスト再作成（上書き）
+                        </button>
+                        <button
+                          onClick={handleClearList}
+                          disabled={!todayCallList}
+                          className={`w-full px-4 py-2 text-left text-sm ${
+                            todayCallList
+                              ? 'text-red-600 hover:bg-red-50'
+                              : 'text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          🗑️ リストクリア
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 架電タイマー（常時表示 / Close範囲外） */}
+      {!isListMode && (
+        <div className="mt-4">
+          <div className="card p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+              {!isListMode && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
+                    onClick={() => {
+                      setSettingsModal({ type: 'goalCallCount' })
+                      setSettingsValue(goalCallCount === null ? '' : String(goalCallCount))
+                    }}
+                  >
+                    目標架電数
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
+                    onClick={() => {
+                      setSettingsModal({ type: 'goalDealCount' })
+                      setSettingsValue(goalDealCount === null ? '' : String(goalDealCount))
+                    }}
+                  >
+                    目標商談獲得数
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
+                    onClick={() => {
+                      setSettingsModal({ type: 'plannedWorkHours' })
+                      setSettingsValue(plannedWorkHours === null ? '' : String(plannedWorkHours))
+                    }}
+                  >
+                    稼働予定時間
+                  </button>
+                  {(goalCallCount !== null || goalDealCount !== null || plannedWorkHours !== null) && (
+                    <button
+                      type="button"
+                      className="px-2 py-2 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
+                      onClick={() => {
+                        setGoalCallCount(null)
+                        setGoalDealCount(null)
+                        setPlannedWorkHours(null)
+                        try {
+                          window.localStorage.removeItem('calls.goalCallCount')
+                          window.localStorage.removeItem('calls.goalDealCount')
+                          window.localStorage.removeItem('calls.plannedWorkHours')
+                        } catch { /* ignore */ }
+                      }}
+                      title="目標架電数・目標商談獲得数・稼働予定時間をすべてクリア"
+                    >
+                      クリア
+                    </button>
+                  )}
+                  {!isListMode && (
+                    <>
+                      <button
+                        type="button"
+                        className="px-3 py-2 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-100 rounded-md hover:bg-primary-100 shadow-sm ml-12"
+                        onClick={() => {
+                          setIsCallListPanelOpen(prev => !prev)
+                        }}
+                      >
+                        本日リスト作成
+                      </button>
+                      <button
+                        type="button"
+                        className="px-3 py-2 text-sm font-medium text-green-700 bg-green-50 border border-green-100 rounded-md hover:bg-green-100 shadow-sm ml-2"
+                        onClick={() => setIsLeadRegisterModalOpen(true)}
+                      >
+                        リスト登録
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              {!isListMode && (
+                <div className="flex items-center gap-2 ml-24">
                 <button
                   type="button"
                   className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -2585,82 +2908,60 @@ export default function CallsPage() {
               >
                 リセット
               </button>
-              <span className="ml-2 text-xs text-gray-500">
-                ※「中断」は稼働時間から除外（リロードしても継続）
-              </span>
-              {plannedWorkHours !== null && (
-                <span className="text-xs text-gray-500">
-                  ｜ 予定稼働: <span className="tabular-nums">{plannedWorkHours}</span>分
-                </span>
+              {!isListMode && (
+                <>
+                  {plannedWorkHours !== null && (
+                    <span className="text-xs text-gray-500">
+                      ｜ 予定稼働: <span className="tabular-nums">{plannedWorkHours}</span>分
+                    </span>
+                  )}
+                </>
               )}
-              </div>
+                </div>
+              )}
             </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
-                <div className="text-xs text-gray-500">開始時間</div>
-                <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">
-                  {callTimerState.startedAtMs ? getLocalTimeString(new Date(callTimerState.startedAtMs)) : '-'}
+            {!isListMode && (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
+                  <div className="text-xs text-gray-500">開始時間</div>
+                  <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">
+                    {callTimerState.startedAtMs ? getLocalTimeString(new Date(callTimerState.startedAtMs)) : '-'}
+                  </div>
+                </div>
+                <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
+                  <div className="text-xs text-gray-500">終了時間</div>
+                  <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">
+                    {callTimerState.endedAtMs ? getLocalTimeString(new Date(callTimerState.endedAtMs)) : '-'}
+                  </div>
+                </div>
+                <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
+                  <div className="text-xs text-gray-500">合計時間</div>
+                  <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">{formatHhMmSs(timerMetrics.totalMs)}</div>
+                </div>
+                <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
+                  <div className="text-xs text-gray-500">架電稼働時間</div>
+                  <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">{formatHhMmSs(timerMetrics.workMs)}</div>
+                </div>
+                <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
+                  <div className="text-xs text-gray-500">中断時間</div>
+                  <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">{formatHhMmSs(timerMetrics.pauseMs)}</div>
                 </div>
               </div>
-              <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
-                <div className="text-xs text-gray-500">終了時間</div>
-                <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">
-                  {callTimerState.endedAtMs ? getLocalTimeString(new Date(callTimerState.endedAtMs)) : '-'}
-                </div>
-              </div>
-              <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
-                <div className="text-xs text-gray-500">合計時間</div>
-                <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">{formatHhMmSs(timerMetrics.totalMs)}</div>
-              </div>
-              <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
-                <div className="text-xs text-gray-500">架電稼働時間</div>
-                <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">{formatHhMmSs(timerMetrics.workMs)}</div>
-              </div>
-              <div className="rounded-md border border-gray-200 bg-white px-4 py-3">
-                <div className="text-xs text-gray-500">中断時間</div>
-                <div className="mt-1 text-lg font-bold text-gray-900 tabular-nums">{formatHhMmSs(timerMetrics.pauseMs)}</div>
-              </div>
+            )}
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* KPI（常時表示 / Close範囲外） */}
       <div className="mt-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
-          <div className="card p-4 border-l-4 border-primary-200 relative">
-            <div className="absolute right-2 top-2 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 border border-primary-100">
-              架電量
-            </div>
-            <div className="text-xs text-gray-500">架電稼働時間（ダブルクリックで編集）</div>
-            <div
-              className="mt-1 flex items-end justify-between gap-2 cursor-pointer"
-              onDoubleClick={() => {
-                const currentMinutes = Math.max(0, Math.floor(timerMetrics.workMs / 60000))
-                setSettingsModal({ type: 'workMinutes' })
-                setSettingsValue(String(currentMinutes))
-              }}
-              title="ダブルクリックで架電稼働時間を修正"
-            >
-              <div className="text-2xl font-bold text-gray-900">
-                {formatValueWithUnit(String(Math.max(0, Math.floor(timerMetrics.workMs / 60000))), '分')}
-              </div>
-              <div className="text-right leading-tight">
-                <div className="text-sm font-semibold text-cyan-600 tabular-nums">
-                  目標:{' '}
-                  {plannedWorkHours === null ? '-' : `${Math.round(Math.max(0, plannedWorkHours))}分`}
-                </div>
-                <div className="text-sm font-bold tabular-nums text-gray-600">
-                  GAP: {formatSignedMinutes(plannedWorkGapMinutes)}
-                </div>
-              </div>
-            </div>
-          </div>
+        {/* カスタム幅: 架電数/リスト +20%, 通電商談獲得率 -15%, 平均通電会話時間 -15% */}
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-[1.2fr_1fr_1fr_0.85fr_1fr_1fr_0.85fr] gap-3">
+          {/* 架電数／架電リスト（+20%幅） */}
           <button
             type="button"
             onClick={() => setKpiDrilldown((prev) => (prev === 'called' ? null : 'called'))}
-            className={`card p-4 border-l-4 border-primary-200 relative text-left hover:-translate-y-0.5 hover:shadow-lg transition-all duration-150 ${
+            className={`card p-4 pt-7 border-l-4 border-primary-200 relative text-left hover:-translate-y-0.5 hover:shadow-lg transition-all duration-150 ${
               kpiDrilldown === 'called' ? 'ring-2 ring-primary-200' : ''
             }`}
             aria-label="架電済（本日）のリード一覧を表示"
@@ -2668,9 +2969,13 @@ export default function CallsPage() {
             <div className="absolute right-2 top-2 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 border border-primary-100">
               架電量
             </div>
-            <div className="text-xs text-gray-500">架電数</div>
-            <div className="mt-1 flex items-end justify-between gap-2">
-              <div className="text-2xl font-bold text-gray-900 tabular-nums">{kpi.callCount}</div>
+            <div className="text-xs text-gray-500 h-4">架電数／架電リスト</div>
+            <div className="mt-1 flex items-end justify-between gap-2 h-14">
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-bold text-gray-900 tabular-nums">{kpi.callCount}</span>
+                <span className="text-lg text-gray-400 mx-1">/</span>
+                <span className="text-2xl font-bold text-gray-900 tabular-nums">{sortedRecords.length}</span>
+              </div>
               <div className="text-right leading-tight">
                 <div className="text-sm font-semibold text-cyan-600 tabular-nums">目標: {goalCallCount === null ? '-' : goalCallCount}</div>
                 <div className="text-sm font-bold tabular-nums text-gray-600">
@@ -2680,9 +2985,9 @@ export default function CallsPage() {
             </div>
           </button>
           {/* 不通数・通電数・未架電の3列カード */}
-          <div className="card p-4">
-            <div className="text-xs text-gray-500 mb-2">架電状況</div>
-            <div className="flex items-center justify-between gap-2">
+          <div className="card p-4 pt-7">
+            <div className="text-xs text-gray-500 h-4">架電状況</div>
+            <div className="mt-1 flex items-center justify-between gap-2 h-14">
               {/* 不通数 */}
               <button
                 type="button"
@@ -2724,7 +3029,7 @@ export default function CallsPage() {
           <button
             type="button"
             onClick={() => setKpiDrilldown((prev) => (prev === 'appointment' ? null : 'appointment'))}
-            className={`card p-4 border-l-4 border-primary-200 relative text-left hover:-translate-y-0.5 hover:shadow-lg transition-all duration-150 ${
+            className={`card p-4 pt-7 border-l-4 border-primary-200 relative text-left hover:-translate-y-0.5 hover:shadow-lg transition-all duration-150 ${
               kpiDrilldown === 'appointment' ? 'ring-2 ring-primary-200' : ''
             }`}
             aria-label="商談獲得（本日）のリード一覧を表示"
@@ -2732,8 +3037,8 @@ export default function CallsPage() {
             <div className="absolute right-2 top-2 rounded-full bg-pink-50 px-2 py-0.5 text-[10px] font-semibold text-pink-700 border border-pink-100">
               結果・実績
             </div>
-            <div className="text-xs text-gray-500">商談獲得数</div>
-            <div className="mt-1 flex items-end justify-between gap-2">
+            <div className="text-xs text-gray-500 h-4">商談獲得数</div>
+            <div className="mt-1 flex items-end justify-between gap-2 h-14">
               <div className="text-2xl font-bold text-gray-900 tabular-nums">{kpi.appointmentCount}</div>
               <div className="text-right leading-tight">
                 <div className="text-sm font-semibold text-cyan-600 tabular-nums">目標: {goalDealCount === null ? '-' : goalDealCount}</div>
@@ -2743,12 +3048,58 @@ export default function CallsPage() {
               </div>
             </div>
           </button>
-          <div className="card p-4 relative">
+          <button
+            type="button"
+            onClick={() => setKpiDrilldown((prev) => (prev === 'connected' ? null : 'connected'))}
+            className={`card p-4 pt-7 relative text-left hover:-translate-y-0.5 hover:shadow-lg transition-all duration-150 ${
+              kpiDrilldown === 'connected' ? 'ring-2 ring-primary-200' : ''
+            }`}
+            aria-label="通電（本日）のリード一覧を表示"
+          >
+            <div className="absolute right-2 top-2 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 border border-primary-100">
+              架電質
+            </div>
+            <div className="text-xs text-gray-500 h-4">通電商談獲得率</div>
+            <div className="mt-1 text-2xl font-bold text-gray-900 tabular-nums h-14 flex items-end">
+              {kpi.connectedAppointmentRate === null
+                ? '-'
+                : formatValueWithUnit(String((kpi.connectedAppointmentRate * 100).toFixed(1)), '％')}
+            </div>
+          </button>
+          <div className="card p-4 pt-7 border-l-4 border-primary-200 relative">
+            <div className="absolute right-2 top-2 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 border border-primary-100">
+              架電量
+            </div>
+            <div className="text-xs text-gray-500 h-4">架電稼働時間（ダブルクリックで編集）</div>
+            <div
+              className="mt-1 flex items-end justify-between gap-2 cursor-pointer h-14"
+              onDoubleClick={() => {
+                const currentMinutes = Math.max(0, Math.floor(timerMetrics.workMs / 60000))
+                setSettingsModal({ type: 'workMinutes' })
+                setSettingsValue(String(currentMinutes))
+              }}
+              title="ダブルクリックで架電稼働時間を修正"
+            >
+              <div className="text-2xl font-bold text-gray-900 tabular-nums">
+                {formatValueWithUnit(String(Math.max(0, Math.floor(timerMetrics.workMs / 60000))), '分')}
+              </div>
+              <div className="text-right leading-tight">
+                <div className="text-sm font-semibold text-cyan-600 tabular-nums">
+                  目標:{' '}
+                  {plannedWorkHours === null ? '-' : `${Math.round(Math.max(0, plannedWorkHours))}分`}
+                </div>
+                <div className="text-sm font-bold tabular-nums text-gray-600">
+                  GAP: {formatSignedMinutes(plannedWorkGapMinutes)}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="card p-4 pt-7 relative">
             <div className="absolute right-2 top-2 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 border border-primary-100">
               架電効率
             </div>
-            <div className="text-xs text-gray-500">1件あたり秒数（通電以外）</div>
-            <div className="mt-1 text-2xl font-bold text-gray-900 tabular-nums">
+            <div className="text-xs text-gray-500 h-4">1件あたり秒数（通電以外）</div>
+            <div className="mt-1 text-2xl font-bold text-gray-900 tabular-nums h-14 flex items-end">
               {kpi.secondsPerNonConnectedCall === null
                 ? '-'
                 : formatValueWithUnit(String(Math.round(kpi.secondsPerNonConnectedCall)), '秒/件')}
@@ -2757,7 +3108,7 @@ export default function CallsPage() {
           <button
             type="button"
             onClick={() => setKpiDrilldown((prev) => (prev === 'connectedTalk60' ? null : 'connectedTalk60'))}
-            className={`card p-4 relative text-left hover:-translate-y-0.5 hover:shadow-lg transition-all duration-150 ${
+            className={`card p-4 pt-7 relative text-left hover:-translate-y-0.5 hover:shadow-lg transition-all duration-150 ${
               kpiDrilldown === 'connectedTalk60' ? 'ring-2 ring-primary-200' : ''
             }`}
             aria-label="通電会話（1分以上 / 本日）のリード一覧を表示"
@@ -2765,26 +3116,8 @@ export default function CallsPage() {
             <div className="absolute right-2 top-2 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 border border-primary-100">
               架電効率
             </div>
-            <div className="text-xs text-gray-500">平均通電会話時間</div>
-            <div className="mt-1 text-2xl font-bold text-gray-900">{kpi.formatSecondsAsMmSs(kpi.avgConnectedSeconds)}</div>
-          </button>
-          <button
-            type="button"
-            onClick={() => setKpiDrilldown((prev) => (prev === 'connected' ? null : 'connected'))}
-            className={`card p-4 relative text-left hover:-translate-y-0.5 hover:shadow-lg transition-all duration-150 ${
-              kpiDrilldown === 'connected' ? 'ring-2 ring-primary-200' : ''
-            }`}
-            aria-label="通電（本日）のリード一覧を表示"
-          >
-            <div className="absolute right-2 top-2 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 border border-primary-100">
-              架電質
-            </div>
-            <div className="text-xs text-gray-500">通電商談獲得率</div>
-            <div className="mt-1 text-2xl font-bold text-gray-900">
-              {kpi.connectedAppointmentRate === null
-                ? '-'
-                : formatValueWithUnit(String((kpi.connectedAppointmentRate * 100).toFixed(1)), '％')}
-            </div>
+            <div className="text-xs text-gray-500 h-4">平均通電会話時間</div>
+            <div className="mt-1 text-2xl font-bold text-gray-900 tabular-nums h-14 flex items-end">{kpi.formatSecondsAsMmSs(kpi.avgConnectedSeconds)}</div>
           </button>
         </div>
       </div>
@@ -2813,7 +3146,26 @@ export default function CallsPage() {
               maxHeight: topAreaHeightPx > 0 ? `calc(100vh - ${topAreaHeightPx}px - 24px)` : 'calc(100vh - 240px)',
             }}
           >
-            <table className="divide-y divide-gray-200" style={{ width: 'max-content', minWidth: '100%' }}>
+            <table className="divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: tableWidth }}>
+              <colgroup>
+                {isSelectionMode && <col style={{ width: 40 }} />}
+                {isColumnVisible('linkedDate') && <col style={{ width: columnWidths.linkedDate }} />}
+                {isColumnVisible('leadId') && <col style={{ width: columnWidths.leadId }} />}
+                {isColumnVisible('companyName') && <col style={{ width: columnWidths.companyName }} />}
+                {isColumnVisible('industry') && <col style={{ width: columnWidths.industry }} />}
+                {isColumnVisible('contactName') && <col style={{ width: columnWidths.contactName }} />}
+                {isColumnVisible('contactNameKana') && <col style={{ width: columnWidths.contactNameKana }} />}
+                {isColumnVisible('phone') && <col style={{ width: columnWidths.phone }} />}
+                {isColumnVisible('contactPreferredDateTime') && <col style={{ width: columnWidths.contactPreferredDateTime }} />}
+                {isColumnVisible('staffIS') && <col style={{ width: columnWidths.staffIS }} />}
+                {isColumnVisible('todayCallStatus') && <col style={{ width: columnWidths.todayCallStatus }} />}
+                {isColumnVisible('callCount') && <col style={{ width: columnWidths.callCount }} />}
+                {isColumnVisible('callStatusToday') && <col style={{ width: columnWidths.callStatusToday }} />}
+                {isColumnVisible('statusIS') && <col style={{ width: columnWidths.statusIS }} />}
+                {isColumnVisible('openingDate') && <col style={{ width: columnWidths.openingDate }} />}
+                {isColumnVisible('allianceRemarks') && <col style={{ width: columnWidths.allianceRemarks }} />}
+                <col style={{ width: columnWidths.quickActions }} />
+              </colgroup>
               <thead className="bg-gray-100 sticky top-0 z-20 shadow-sm">
                 <tr>
                   {/* 選択モード時のチェックボックス列 */}
@@ -2868,36 +3220,36 @@ export default function CallsPage() {
                     />
                   </th>
                   )}
-                  {isColumnVisible('leadSource') && (
+                  {isColumnVisible('leadId') && (
                   <th 
                     className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none border-r border-gray-400"
-                    style={{ width: columnWidths.leadSource, minWidth: 20 }}
+                    style={{ width: columnWidths.leadId, minWidth: 20 }}
                   >
                     <button
                       type="button"
                       className="inline-flex items-center justify-center w-full select-none cursor-pointer hover:bg-gray-50"
-                      aria-label="リードソースでソート"
+                      aria-label="リードIDでソート"
                       onClick={(e) => {
                         if ((e as any).detail > 1) return
                         setSortConfig(prev => {
-                          const isSame = prev?.key === 'leadSource'
+                          const isSame = prev?.key === 'leadId'
                           const nextDirection: SortDirection = isSame && prev?.direction === 'asc' ? 'desc' : 'asc'
-                          return { key: 'leadSource', direction: nextDirection }
+                          return { key: 'leadId', direction: nextDirection }
                         })
                       }}
                       onDoubleClick={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        hideColumn('leadSource')
+                        hideColumn('leadId')
                       }}
                       title="ダブルクリックで非表示"
                     >
-                      <span>リードソース</span>
-                      <SortIcons active={sortConfig?.key === 'leadSource' ? sortConfig.direction : undefined} />
+                      <span>リードID</span>
+                      <SortIcons active={sortConfig?.key === 'leadId' ? sortConfig.direction : undefined} />
                     </button>
                     <div
                       className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize z-20"
-                      onMouseDown={(e) => handleResizeStart('leadSource', e)}
+                      onMouseDown={(e) => handleResizeStart('leadId', e)}
                       style={{ transform: 'translateX(50%)' }}
                     />
                   </th>
@@ -3041,7 +3393,7 @@ export default function CallsPage() {
                   {isColumnVisible('phone') && (
                   <th 
                     className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none"
-                    style={{ width: columnWidths.phone, minWidth: 20, maxWidth: 150 }}
+                    style={{ width: columnWidths.phone, minWidth: 20 }}
                   >
                     <button
                       type="button"
@@ -3557,39 +3909,39 @@ export default function CallsPage() {
                         </td>
                       )}
                       {isColumnVisible('linkedDate') && (
-                        <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.linkedDate, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap truncate" style={{ width: columnWidths.linkedDate, minWidth: 20 }} title={formatLinkedDateYYMMDD(record.linkedDate)}>
                           {formatLinkedDateYYMMDD(record.linkedDate)}
                         </td>
                       )}
-                      {isColumnVisible('leadSource') && (
-                        <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.leadSource, minWidth: 20 }}>
-                          {formatLeadSourceShort(record.leadSource)}
+                      {isColumnVisible('leadId') && (
+                        <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap truncate" style={{ width: columnWidths.leadId, minWidth: 20 }} title={record.leadId}>
+                          {record.leadId}
                         </td>
                       )}
                       {isColumnVisible('companyName') && (
-                        <td className="px-4 py-4 text-sm text-gray-900" style={{ width: columnWidths.companyName, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-900 whitespace-nowrap truncate" style={{ width: columnWidths.companyName, minWidth: 20 }} title={record.companyName}>
                           {record.companyName}
                         </td>
                       )}
                       {isColumnVisible('industry') && (
-                        <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.industry, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap truncate" style={{ width: columnWidths.industry, minWidth: 20 }} title={record.industry || '-'}>
                           {record.industry || '-'}
                         </td>
                       )}
                       {isColumnVisible('contactName') && (
-                        <td className="px-4 py-4 text-sm text-gray-900" style={{ width: columnWidths.contactName, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-900 whitespace-nowrap" style={{ width: columnWidths.contactName, minWidth: 20 }} title={record.contactName}>
                           {record.contactName}
                         </td>
                       )}
                       {isColumnVisible('contactNameKana') && (
-                        <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.contactNameKana, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap truncate" style={{ width: columnWidths.contactNameKana, minWidth: 20 }} title={record.contactNameKana || '-'}>
                           {record.contactNameKana || '-'}
                         </td>
                       )}
                       {isColumnVisible('phone') && (
                         <td
-                          className="px-4 py-4 text-sm text-gray-500 truncate"
-                          style={{ width: columnWidths.phone, minWidth: 20, maxWidth: 150 }}
+                          className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap"
+                          style={{ width: columnWidths.phone, minWidth: 20 }}
                           title={record.phone || ''}
                         >
                           {record.phone}
@@ -3597,7 +3949,7 @@ export default function CallsPage() {
                       )}
                       {isColumnVisible('contactPreferredDateTime') && (
                         <td
-                          className="px-4 py-4 text-sm text-gray-500 truncate border-r border-gray-300"
+                          className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap truncate border-r border-gray-300"
                           style={{ width: columnWidths.contactPreferredDateTime, minWidth: 20, maxWidth: 150 }}
                           title={record.contactPreferredDateTime || ''}
                         >
@@ -3606,18 +3958,18 @@ export default function CallsPage() {
                       )}
                       {/* 担当IS - 本日の左に配置 */}
                       {isColumnVisible('staffIS') && (
-                        <td className="px-4 py-4 text-sm text-gray-700" style={{ width: columnWidths.staffIS, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-700 whitespace-nowrap truncate" style={{ width: columnWidths.staffIS, minWidth: 20 }} title={record.staffIS || '-'}>
                           {record.staffIS || '-'}
                         </td>
                       )}
                       {isColumnVisible('todayCallStatus') && (
-                        <td className="px-4 py-4 text-sm text-gray-700" style={{ width: columnWidths.todayCallStatus, minWidth: 20 }}>
-                          {record.todayCallStatus === '済' ? '完了' : '-'}
+                        <td className="px-4 py-4 text-sm text-gray-700 whitespace-nowrap truncate" style={{ width: columnWidths.todayCallStatus, minWidth: 20 }}>
+                          {record.todayCallStatus === '済' && isDateToday(record.endedAt) ? '完了' : '-'}
                         </td>
                       )}
                       {/* 架電回数 - 架電中の位置に配置 */}
                       {isColumnVisible('callCount') && (
-                        <td className="px-4 py-4 text-sm text-gray-700" style={{ width: columnWidths.callCount, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-700 whitespace-nowrap truncate" style={{ width: columnWidths.callCount, minWidth: 20 }}>
                           {(() => {
                             const count = record.callCount ?? 0
                             const callResult = String(record.callStatusToday || record.resultContactStatus || '').trim()
@@ -3647,12 +3999,20 @@ export default function CallsPage() {
                         </td>
                       )}
                       {isColumnVisible('callStatusToday') && (
-                        <td className="px-4 py-4 text-sm text-gray-700" style={{ width: columnWidths.callStatusToday, minWidth: 20 }}>
-                          {record.callStatusToday || record.resultContactStatus || (record.status === '架電中' ? '架電中' : '未架電')}
+                        <td className="px-4 py-4 text-sm text-gray-700 whitespace-nowrap truncate" style={{ width: columnWidths.callStatusToday, minWidth: 20 }}>
+                          {(() => {
+                            const statusIsText = String(record.statusIS || '').trim()
+                            const isDisqualified =
+                              statusIsText.startsWith('05a.') ||
+                              statusIsText.includes('Disqualified') ||
+                              (statusIsText.includes('対象外') && !statusIsText.includes('失注') && !statusIsText.includes('リサイクル対象外'))
+                            if (isDisqualified) return 'ー'
+                            return record.callStatusToday || record.resultContactStatus || (record.status === '架電中' ? '架電中' : '未架電')
+                          })()}
                         </td>
                       )}
                       {isColumnVisible('statusIS') && (
-                        <td className="px-4 py-4 text-sm text-gray-700" style={{ width: columnWidths.statusIS, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-700 whitespace-nowrap truncate" style={{ width: columnWidths.statusIS, minWidth: 20 }} title={record.statusIS || '-'}>
                           {record.statusIS || '-'}
                         </td>
                       )}
@@ -3669,7 +4029,7 @@ export default function CallsPage() {
                         </td>
                       )}
                       {isColumnVisible('openingDate') && (
-                        <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.openingDate, minWidth: 20 }}>
+                        <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap truncate" style={{ width: columnWidths.openingDate, minWidth: 20 }} title={record.openingDate || '-'}>
                           {record.openingDate || '-'}
                         </td>
                       )}
@@ -3680,7 +4040,18 @@ export default function CallsPage() {
                         </td>
                       )}
                       {isColumnVisible('allianceRemarks') && (
-                        <td className="px-4 py-4 text-sm text-gray-500" style={{ width: columnWidths.allianceRemarks, minWidth: 20 }}>
+                        <td 
+                          className="px-4 py-4 text-sm text-gray-500" 
+                          style={{ 
+                            width: columnWidths.allianceRemarks, 
+                            minWidth: 20, 
+                            maxWidth: columnWidths.allianceRemarks,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                          title={record.allianceRemarks || '-'}
+                        >
                           {record.allianceRemarks || '-'}
                         </td>
                       )}
@@ -3689,15 +4060,18 @@ export default function CallsPage() {
                         style={{ width: columnWidths.quickActions, minWidth: 180 }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex flex-wrap gap-2 justify-center">
+                        <div className="flex flex-nowrap gap-2 justify-center">
                           {(() => {
                             const isCalling = record.status === '架電中'
                             const callResult = record.callStatusToday || record.resultContactStatus || ''
                             const isConnected = callResult === '通電'
-                            const isEnded = record.todayCallStatus === '済'
+                            // 商談獲得のリードは論理的に終了状態として扱う
+                            const statusIS = String(record.statusIS || '')
+                            const isAppointment = statusIS.includes('商談獲得')
+                            const isEnded = record.todayCallStatus === '済' || isAppointment
                             const hasNoAnswerAttempt = /^不通\d+$/.test(String(callResult).trim())
 
-                            const base = 'px-2 py-1 text-xs rounded transition-colors'
+                            const base = 'px-2 py-1 text-xs rounded transition-colors whitespace-nowrap shrink-0'
                             const grayInactive = `${base} bg-gray-100 text-gray-800 hover:bg-gray-200`
                             const grayActive = `${base} bg-gray-900 text-white hover:bg-gray-800`
                             const grayMedium = `${base} bg-gray-400 text-white hover:bg-gray-500`
@@ -3931,6 +4305,47 @@ export default function CallsPage() {
         onClose={() => setIsCallListModalOpen(false)}
         onCreate={async (conditions, name, isShared, staffIS) => {
           await createCallListMutation.mutateAsync({ conditions, name, isShared, staffIS })
+        }}
+      />
+
+      {/* リード個別登録モーダル */}
+      <LeadRegisterModal
+        isOpen={isLeadRegisterModalOpen}
+        onClose={() => setIsLeadRegisterModalOpen(false)}
+        isSubmitting={isLeadRegistering}
+        onSubmit={async (formData: LeadFormData) => {
+          setIsLeadRegistering(true)
+          try {
+            const response = await fetch('/api/calls', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                leadId: formData.leadId,
+                leadSource: formData.leadSource,
+                companyName: formData.companyName,
+                contactName: formData.contactName,
+                contactNameKana: formData.contactNameKana,
+                phone: formData.phone,
+                email: formData.email,
+                address: formData.address,
+                industry: formData.industry,
+                openingDateOriginal: formData.openingDateOriginal,
+                contactPreferredDateTime: formData.contactPreferredDateTime,
+                allianceRemarks: formData.allianceRemarks,
+                linkedDate: new Date().toISOString().split('T')[0],
+                status: '未架電',
+              }),
+            })
+            if (!response.ok) {
+              const error = await response.json()
+              throw new Error(error.details || error.error || '登録に失敗しました')
+            }
+            // 成功したらデータを再取得
+            await queryClient.invalidateQueries({ queryKey: ['calls'] })
+            alert('リードを登録しました')
+          } finally {
+            setIsLeadRegistering(false)
+          }
         }}
       />
     </div>

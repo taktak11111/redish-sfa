@@ -11,5 +11,8 @@
     "vercel-build": "npm run build --workspace=frontend",
     "dev": "npm run dev --workspace=frontend",
     "lint": "npm run lint --workspace=frontend"
+  },
+  "devDependencies": {
+    "csv-parse": "^6.1.0"
   }
 }

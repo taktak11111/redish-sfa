@@ -33,15 +33,12 @@ const navigation: NavElement[] = [
   { type: 'separator', label: '分析・改善' },
   { name: '売上・成約分析', href: '/analysis/sales', icon: ChartPieIcon },
   { name: 'リード連携分析', href: '/analysis/leads', icon: ChartBarIcon, badge: '構築中' },
-  { name: '架電結果分析', href: '/analysis/calls', icon: PhoneIcon, badge: '構築中' },
-  { name: '商談結果分析', href: '/analysis/field', icon: ChartBarIcon, badge: '構築中' },
-  { name: '架電プロセス分析', href: '/analysis/calls-process', icon: ChartBarIcon, badge: '構築中' },
-  { name: '商談プロセス分析', href: '/analysis/deals-process', icon: ChartBarIcon, badge: '構築中' },
+  { name: '架電分析', href: '/analysis/calls', icon: PhoneIcon, badge: '構築中' },
+  { name: '商談分析', href: '/analysis/deals', icon: ChartBarIcon, badge: '構築中' },
   
   // 成長・学習
   { type: 'separator', label: '学習' },
   { name: 'ナレッジセンター', href: '/learning', icon: AcademicCapIcon, badge: '構築中' },
-  { name: 'ユーザーマニュアル', href: '/manual', icon: BookOpenIcon },
   
   { name: '設定', href: '/settings', icon: CogIcon },
 ]

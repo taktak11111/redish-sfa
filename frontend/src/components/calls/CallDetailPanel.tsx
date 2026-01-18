@@ -381,10 +381,11 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
       if (!String(formData.nextActionContent || '').trim()) missing.push('次回連絡内容')
     }
 
-    if (isContacting) {
-      if (!String(formData.nextActionDate || '').trim()) missing.push('次回連絡日')
-      if (!String(formData.nextActionContent || '').trim()) missing.push('次回連絡内容')
-    }
+    // コンタクト試行中は次回連絡日/内容は任意（不通再架電パターンでは不要のため）
+    // if (isContacting) {
+    //   if (!String(formData.nextActionDate || '').trim()) missing.push('次回連絡日')
+    //   if (!String(formData.nextActionContent || '').trim()) missing.push('次回連絡内容')
+    // }
 
     if (isAppointment) {
       if (!String(formData.appointmentDate || '').trim()) missing.push('商談獲得日')
@@ -946,12 +947,60 @@ export function CallDetailPanel({ record, onClose, onSave, isSaving }: CallDetai
 
                 <div>
                   <label className="label">架電進捗<span className="text-red-500 text-xs ml-0.5">*</span></label>
-                  <div className="input bg-gray-50 text-gray-700 cursor-default">
-                    {String(formData.status || '未架電')}
-                  </div>
+                  <select
+                    value={formData.status || '未架電'}
+                    onChange={(e) => handleChange('status', e.target.value as any)}
+                    className={isEditing ? "input" : "input bg-gray-50 text-gray-700 cursor-default"}
+                    disabled={!isEditing}
+                  >
+                    <option value="未架電">未架電</option>
+                    <option value="不通">不通</option>
+                    <option value="通電">通電</option>
+                    <option value="商談獲得">商談獲得</option>
+                    <option value="架電対象外">架電対象外</option>
+                  </select>
                   <div className="mt-1 text-xs text-gray-500">
-                    クイックボタンで自動管理します（手入力不要）。
+                    通常はクイックボタンで自動管理されます。
                   </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="label">架電回数</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.callCount ?? 0}
+                    onChange={(e) => handleChange('callCount', parseInt(e.target.value) || 0)}
+                    className={isEditing ? "input" : "input bg-gray-50 text-gray-700 cursor-default"}
+                    readOnly={!isEditing}
+                  />
+                </div>
+                <div>
+                  <label className="label">架電結果</label>
+                  <select
+                    value={formData.callStatusToday || formData.resultContactStatus || ''}
+                    onChange={(e) => {
+                      // 両方のフィールドを同期
+                      handleChange('callStatusToday', e.target.value)
+                      handleChange('resultContactStatus', e.target.value)
+                    }}
+                    className={isEditing ? "input" : "input bg-gray-50 text-gray-700 cursor-default"}
+                    disabled={!isEditing}
+                  >
+                    <option value="">未設定</option>
+                    <option value="通電">通電</option>
+                    <option value="不通1">不通1</option>
+                    <option value="不通2">不通2</option>
+                    <option value="不通3">不通3</option>
+                    <option value="不通4">不通4</option>
+                    <option value="不通5">不通5</option>
+                    <option value="不通6">不通6</option>
+                    <option value="不通7">不通7</option>
+                    <option value="不通8">不通8</option>
+                    <option value="不通9">不通9</option>
+                    <option value="不通10">不通10</option>
+                  </select>
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

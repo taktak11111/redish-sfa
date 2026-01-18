@@ -62,6 +62,14 @@ const FIELD_TO_SNAKE: Record<string, string> = {
   meetsmoreEntityType: 'meetsmore_entity_type',
   makuakePjtPage: 'makuake_pjt_page',
   makuakeExecutorPage: 'makuake_executor_page',
+  // 架電管理関連フィールド
+  status: 'status', // 架電進捗状態
+  statusIs: 'status_is', // ISステータス
+  callCount: 'call_count', // 架電数カウント
+  resultContactStatus: 'result_contact_status', // 結果/コンタクト状況
+  callStatusToday: 'call_status_today', // 当日架電結果
+  todayCallStatus: 'today_call_status', // 当日架電完了状態
+  staffIs: 'staff_is', // 担当IS
 }
 
 // リードソースのプレフィックスマッピング
@@ -189,11 +197,8 @@ export async function POST(request: NextRequest) {
       const rowNum = rowIndex + 2 // ヘッダー行 + 0-index
       
       try {
-        // マッピングに従ってデータを構築
-        const recordData: Record<string, any> = {
-          status: '未架電',
-          call_count: 0,
-        }
+        // マッピングに従ってデータを構築（デフォルト値は設定しない）
+        const recordData: Record<string, any> = {}
         
         let leadSource = 'REDISH' // デフォルト
         
@@ -204,6 +209,7 @@ export async function POST(request: NextRequest) {
           if (colIndex === undefined) continue
           
           const value = row[colIndex]?.trim() || ''
+          // 空の値はスキップ（デフォルト値で上書きしない）
           if (!value) continue
           
           if (mapping.targetField === 'leadSource') {
@@ -211,8 +217,20 @@ export async function POST(request: NextRequest) {
           }
           
           const snakeField = FIELD_TO_SNAKE[mapping.targetField] || mapping.targetField
-          recordData[snakeField] = value
+          
+          // call_countは数値に変換
+          if (snakeField === 'call_count') {
+            const numValue = parseInt(value, 10)
+            if (!isNaN(numValue)) {
+              recordData[snakeField] = numValue
+            }
+          } else {
+            recordData[snakeField] = value
+          }
         }
+        
+        // 新規レコードの場合のみデフォルト値を設定
+        // 既存レコードの更新時は、元データに含まれている値のみを使用
         
         // 必須チェック
         if (!recordData.company_name && !recordData.contact_name) {
@@ -230,15 +248,37 @@ export async function POST(request: NextRequest) {
         // 電話番号で重複チェック
         const { data: existing } = await supabase
           .from('call_records')
-          .select('lead_id')
+          .select('lead_id, status, call_count, status_is, result_contact_status, staff_is')
           .eq('phone', recordData.phone)
           .single()
         
         if (existing) {
           // 既存レコードを更新
+          // 重要なフィールド（status, call_count等）は、元データに含まれている場合のみ更新
+          // 元データに含まれていない場合は、既存の値を保持
+          const updateData: Record<string, any> = { ...recordData }
+          
+          // 既存レコードの重要なフィールドを保持（元データに含まれていない場合）
+          if (!updateData.status && existing.status) {
+            // statusが元データにない場合は既存値を保持（更新しない）
+          }
+          if (updateData.call_count === undefined && existing.call_count !== undefined) {
+            // call_countが元データにない場合は既存値を保持（更新しない）
+            delete updateData.call_count
+          }
+          if (!updateData.status_is && existing.status_is) {
+            // status_isが元データにない場合は既存値を保持（更新しない）
+          }
+          if (!updateData.result_contact_status && existing.result_contact_status) {
+            // result_contact_statusが元データにない場合は既存値を保持（更新しない）
+          }
+          if (!updateData.staff_is && existing.staff_is) {
+            // staff_isが元データにない場合は既存値を保持（更新しない）
+          }
+          
           const { error: updateError } = await supabase
             .from('call_records')
-            .update(recordData)
+            .update(updateData)
             .eq('lead_id', existing.lead_id)
           
           if (updateError) {
@@ -249,6 +289,14 @@ export async function POST(request: NextRequest) {
           }
         } else {
           // 新規レコードを作成
+          // デフォルト値を設定（元データに含まれていない場合のみ）
+          if (!recordData.status) {
+            recordData.status = '未架電'
+          }
+          if (recordData.call_count === undefined) {
+            recordData.call_count = 0
+          }
+          
           recordData.lead_source = leadSource
           recordData.lead_id = await generateLeadId(supabase, leadSource)
           recordData.linked_date = recordData.linked_date || new Date().toISOString().split('T')[0]

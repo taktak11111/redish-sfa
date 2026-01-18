@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 interface ManualSection {
   id: string
@@ -369,7 +370,7 @@ function SpreadsheetSettingsContent() {
                     <div className="bg-blue-50 p-2 rounded border border-blue-200 font-mono">A</div>
                     <div className="bg-white p-2 rounded border">会社名</div>
                     <div className="bg-green-50 p-2 rounded border border-green-200">
-                      <select className="w-full text-xs border-0 bg-transparent">
+                      <select className="w-full text-xs border-0 bg-transparent" aria-label="マッピング先フィールド（会社名）">
                         <option>会社名 (companyName)</option>
                       </select>
                     </div>
@@ -378,7 +379,7 @@ function SpreadsheetSettingsContent() {
                     <div className="bg-blue-50 p-2 rounded border border-blue-200 font-mono">B</div>
                     <div className="bg-white p-2 rounded border">電話番号</div>
                     <div className="bg-green-50 p-2 rounded border border-green-200">
-                      <select className="w-full text-xs border-0 bg-transparent">
+                      <select className="w-full text-xs border-0 bg-transparent" aria-label="マッピング先フィールド（電話番号）">
                         <option>電話番号 (phone) *</option>
                       </select>
                     </div>
@@ -756,6 +757,13 @@ function SavedSettingsContent() {
 }
 
 export default function UserManualPage() {
+  const router = useRouter()
+
+  // 旧URL: /manual → /learning のマニュアルタブへ誘導
+  useEffect(() => {
+    router.replace('/learning?tab=manual')
+  }, [router])
+
   const [activeSection, setActiveSection] = useState<string>('quickstart')
   const [activeSettingsTab, setActiveSettingsTab] = useState<string>('dropdown')
 

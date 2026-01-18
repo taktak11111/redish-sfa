@@ -51,16 +51,14 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: '担当者C', label: '担当者C' },
   ],
   statusIS: [
-    { value: '01.新規リード', label: '01.新規リード' },
-    { value: '02.コンタクト試行中', label: '02.コンタクト試行中' },
-    { value: '03.アポイント獲得済', label: '03.アポイント獲得済' },
-    { value: '04.失注（ナーチャリング対象外）', label: '04.失注（ナーチャリング対象外）' },
-    { value: '06.ナーチャリング対象', label: '06.ナーチャリング対象' },
-    { value: '05a.対象外（Disqualified）', label: '05a.対象外（Disqualified）' },
-    { value: '05b.連絡不能（Unreachable）', label: '05b.連絡不能（Unreachable）' },
-    // 互換維持（旧データ表示用）
-    { value: '05.対応不可/対象外（旧）', label: '05.対応不可/対象外（旧）' },
-    { value: '07.既存顧客（属性へ移行予定）', label: '07.既存顧客（属性へ移行予定）' },
+    { value: '新規リード', label: '新規リード' },
+    { value: 'コンタクト試行中（折り返し含む）', label: 'コンタクト試行中（折り返し含む）' },
+    { value: '商談獲得', label: '商談獲得' },
+    { value: '失注（リサイクル対象外）', label: '失注（リサイクル対象外）' },
+    { value: '失注（リサイクル対象 A-E付与）', label: '失注（リサイクル対象 A-E付与）' },
+    { value: '対象外（Disqualified）', label: '対象外（Disqualified）' },
+    { value: '連絡不能（Unreachable）', label: '連絡不能（Unreachable）' },
+    { value: '既存顧客（属性へ移行予定）', label: '既存顧客（属性へ移行予定）' },
   ],
   cannotContactReason: [
     // 対象外（Disqualified）
@@ -79,6 +77,7 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: 'D1.心当たりなし（何のことかわからない）', label: 'D1.心当たりなし（何のことかわからない）' },
     { value: 'D2.言葉が通じない（言語障壁）', label: 'D2.言葉が通じない（言語障壁）' },
     { value: 'D3.完全に興味なし', label: 'D3.完全に興味なし' },
+    { value: 'D4.その他', label: 'D4.その他' },
   ],
   unreachableReason: [
     { value: 'U1.番号違い', label: 'U1.番号違い' },
@@ -110,6 +109,7 @@ export const DEFAULT_SETTINGS: DropdownSettings = {
     { value: '弊社対応不可', label: '弊社対応不可' },
     { value: 'オンライン対応不可', label: 'オンライン対応不可' },
     { value: '連携ミス', label: '連携ミス' },
+    { value: '日本語不可', label: '日本語不可' },
     { value: '不明（要確認）', label: '不明（要確認）' },
   ],
   lostReasonCompetitorSub: [

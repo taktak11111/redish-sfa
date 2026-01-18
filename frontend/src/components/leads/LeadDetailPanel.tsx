@@ -282,8 +282,8 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
                     <label className="label">OMC情報①自己資金</label>
                     <input 
                       type="text" 
-                      value={formData.omcAdditionalInfo1 || ''} 
-                      onChange={(e) => handleChange('omcAdditionalInfo1', e.target.value)}
+                      value={formData.omcSelfFunds || ''} 
+                      onChange={(e) => handleChange('omcSelfFunds', e.target.value)}
                       className="input"
                     />
                   </div>
@@ -291,8 +291,8 @@ export function LeadDetailPanel({ record, onClose, onSave, isSaving }: LeadDetai
                     <label className="label">OMC情報②借入希望額</label>
                     <input 
                       type="text" 
-                      value={formData.omcSelfFunds || ''} 
-                      onChange={(e) => handleChange('omcSelfFunds', e.target.value)}
+                      value={formData.desiredLoanamount || ''} 
+                      onChange={(e) => handleChange('desiredLoanamount', e.target.value)}
                       className="input"
                     />
                   </div>

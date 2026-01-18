@@ -57,6 +57,7 @@ function toCamelCase(record: any) {
     omcAdditionalInfo1: record.omc_additional_info1, // 後方互換性
     omcSelfFunds: record.omc_self_funds, // 後方互換性
     omcPropertyStatus: record.omc_property_status, // 後方互換性
+    desiredLoanamount: record.desired_loan_amount,
     sourceSpecificData: record.source_specific_data || {}, // JSONB形式
     amazonTaxAccountant: record.amazon_tax_accountant,
     meetsmoreLink: record.meetsmore_link,
@@ -110,6 +111,60 @@ function toCamelCase(record: any) {
   }
 }
 
+// status自動遷移ルール: status_isとcall_countに基づいてstatusを決定
+// ルール:
+// 1. status_isが「アポ獲得」系 → '商談獲得'
+// 2. call_count >= 1 → 最低でも '架電中'
+// 3. status_isが失注系/既存顧客系/コンタクト試行中等 → '架電中'
+// 4. それ以外 → '未架電'
+function determineStatus(statusIS: string | null | undefined, callCount: number | null | undefined, currentStatus: string | null | undefined): string {
+  // アポ獲得系ステータスの場合は商談獲得
+  const appointmentStatuses = ['03.アポ獲得', '03.アポイント獲得済', '09.アポ獲得', 'アポ獲得']
+  if (statusIS && appointmentStatuses.some(s => statusIS.includes(s) || statusIS.includes('アポ'))) {
+    return '商談獲得'
+  }
+
+  const isDisqualified =
+    !!statusIS &&
+    (
+      statusIS.startsWith('05a.') ||
+      statusIS.includes('Disqualified') ||
+      (statusIS.includes('対象外') && !statusIS.includes('失注') && !statusIS.includes('リサイクル対象外'))
+    )
+  if (isDisqualified) {
+    return '架電対象外'
+  }
+
+  if (currentStatus === '通電') {
+    return '通電'
+  }
+  
+  // 架電回数が1以上なら最低でも架電中
+  if (callCount && callCount >= 1) {
+    // 現在が商談獲得ならそのまま維持
+    if (currentStatus === '商談獲得') {
+      return '商談獲得'
+    }
+    return '架電中'
+  }
+  
+  // status_isが架電中相当のステータスの場合
+  const callingStatuses = [
+    '02.コンタクト試行中', 'コンタクト試行中',
+    '04.失注', '失注', '90.失注', '90. 失注',
+    '05.対応不可/対象外', '対応不可', '対象外', '架電対象外',
+    '06.ナーチャリング対象', 'ナーチャリング', 'リサイクル',
+    '07.既存顧客', '既存顧客',
+    '08.掛け直し', '掛け直し',
+  ]
+  if (statusIS && callingStatuses.some(s => statusIS.includes(s))) {
+    return '架電中'
+  }
+  
+  // 現在のステータスを維持（undefinedの場合）、なければ未架電
+  return currentStatus || '未架電'
+}
+
 // キャメルケース → スネークケース変換
 function toSnakeCase(data: any) {
   const result: any = {}
@@ -132,6 +187,7 @@ function toSnakeCase(data: any) {
   if (data.omcAdditionalInfo1 !== undefined) result.omc_additional_info1 = data.omcAdditionalInfo1
   if (data.omcSelfFunds !== undefined) result.omc_self_funds = data.omcSelfFunds
   if (data.omcPropertyStatus !== undefined) result.omc_property_status = data.omcPropertyStatus
+  if (data.desiredLoanamount !== undefined) result.desired_loan_amount = data.desiredLoanamount
   // JSONB形式のsource_specific_dataを更新
   if (data.sourceSpecificData !== undefined) result.source_specific_data = data.sourceSpecificData
   // JSONB形式のsource_specific_dataを更新
@@ -191,15 +247,32 @@ async function fetchAllRecords(supabase: SupabaseClient, baseQuery: any): Promis
   const allRecords: any[] = []
   const pageSize = 1000
   let offset = 0
+  let retryCount = 0
+  const maxRetries = 3
   
   while (true) {
-    const { data, error } = await baseQuery.range(offset, offset + pageSize - 1)
-    if (error) throw error
-    if (!data || data.length === 0) break
-    
-    allRecords.push(...data)
-    if (data.length < pageSize) break // 最後のページ
-    offset += pageSize
+    try {
+      const { data, error } = await baseQuery.range(offset, offset + pageSize - 1)
+      if (error) {
+        console.error(`[API/calls] Supabase query error at offset ${offset}:`, error)
+        throw error
+      }
+      if (!data || data.length === 0) break
+      
+      allRecords.push(...data)
+      if (data.length < pageSize) break // 最後のページ
+      offset += pageSize
+      retryCount = 0 // 成功したらリトライカウントをリセット
+    } catch (error: any) {
+      retryCount++
+      if (retryCount > maxRetries) {
+        console.error(`[API/calls] Max retries exceeded at offset ${offset}`)
+        throw error
+      }
+      console.log(`[API/calls] Retrying query at offset ${offset} (attempt ${retryCount}/${maxRetries})`)
+      // リトライ前に少し待機
+      await new Promise(resolve => setTimeout(resolve, 1000 * retryCount))
+    }
   }
   
   return allRecords
@@ -331,7 +404,34 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
+    // 現在のレコードを取得（status自動遷移の判定に必要）
+    const { data: currentRecord, error: fetchError } = await supabase
+      .from('call_records')
+      .select('status, status_is, call_count')
+      .eq('lead_id', leadId)
+      .single()
+
+    if (fetchError) {
+      console.error('[API/calls] Failed to fetch current record:', fetchError)
+    }
+
     const snakeCaseUpdates = toSnakeCase(updates)
+
+    // status自動遷移ロジック: status_isまたはcall_countが更新された場合
+    // または明示的にstatusが指定されていない場合に自動計算
+    const newStatusIS = snakeCaseUpdates.status_is ?? currentRecord?.status_is
+    const newCallCount = snakeCaseUpdates.call_count ?? currentRecord?.call_count
+    const currentStatus = currentRecord?.status
+
+    // statusが明示的に指定されていない場合、自動計算
+    if (updates.status === undefined) {
+      const calculatedStatus = determineStatus(newStatusIS, newCallCount, currentStatus)
+      // 現在のstatusと異なる場合のみ更新
+      if (calculatedStatus !== currentStatus) {
+        snakeCaseUpdates.status = calculatedStatus
+        console.log(`[API/calls] Auto-transitioning status: ${currentStatus} -> ${calculatedStatus} (statusIS: ${newStatusIS}, callCount: ${newCallCount})`)
+      }
+    }
 
     const { data, error } = await supabase
       .from('call_records')

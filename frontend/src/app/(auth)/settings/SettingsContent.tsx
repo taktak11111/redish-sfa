@@ -22,6 +22,8 @@ interface SavedSpreadsheetConfig extends SpreadsheetConfig {
   name: string         // 表示名（例: TEMPOS, OMC）
   leadSourcePrefix: string  // リードソースのプレフィックス
   createdAt: string    // 作成日時
+  updateMode?: 'incremental' | 'full'  // 更新モード
+  incrementalLimit?: number  // 差分更新時の処理件数
 }
 
 interface ColumnMapping {
@@ -121,6 +123,40 @@ const MAPPABLE_FIELDS = [
   { key: 'temposCpCode', label: 'TEMPOS担当コード', required: false },
   { key: 'omcInteriorMatchApplied', label: '内装マッチ申し込み', required: false },
 ]
+
+// フィールド名と日本語ラベルのマッピング（欠損データ統計表示用）
+const FIELD_LABELS: Record<string, string> = {
+  leadSource: 'リードソース',
+  linkedDate: '連携日',
+  industry: '業種',
+  companyName: '会社名/店舗名',
+  contactName: '氏名',
+  contactNameKana: 'ふりがな',
+  phone: '電話番号',
+  email: 'メールアドレス',
+  address: '住所/エリア',
+  openingDate: '開業時期',
+  contactPreferredDateTime: '連絡希望日時',
+  allianceRemarks: '連携元備考',
+  omcAdditionalInfo1: 'OMC追加情報①',
+  omcSelfFunds: '自己資金',
+  omcPropertyStatus: '物件状況',
+  amazonTaxAccountant: 'Amazon税理士有無',
+  meetsmoreLink: 'Meetsmoreリンク',
+  meetsmoreEntityType: 'Meetsmore法人・個人',
+  makuakePjtPage: 'MakuakePJT page',
+  makuakeExecutorPage: 'Makuake実行者page',
+  restaurantType: '業態',
+  desiredLoanamount: '融資希望額',
+  shopName: '店舗名',
+  shopPhone: '店舗電話',
+  temposExternalId: 'TEMPOS ID',
+  omcExternalId: 'OMC ID',
+  temposCpDesk: 'TEMPOS受付窓口',
+  temposSalesOwner: 'TEMPOS営業担当者',
+  temposCpCode: 'TEMPOS担当コード',
+  omcInteriorMatchApplied: '内装マッチ申し込み',
+}
 
 const DEFAULT_SPREADSHEET_CONFIG: SpreadsheetConfig = {
   spreadsheetId: '',
@@ -246,21 +282,42 @@ export default function SettingsContent() {
   const [spreadsheetHeaders, setSpreadsheetHeaders] = useState<string[]>([])
   const [isLoadingHeaders, setIsLoadingHeaders] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
-  const [importingConfigId, setImportingConfigId] = useState<string | null>(null) // 取得中の設定ID
+  // 取得中の状態管理（設定IDとモードを保持）
+  const [importingState, setImportingState] = useState<{ configId: string; mode: 'full' | 'incremental' } | null>(null)
+  // 後方互換性のため、importingConfigIdも保持（既存コードで使用されている可能性があるため）
+  const importingConfigId = importingState?.configId || null
   const [importResult, setImportResult] = useState<{
     success: number
     failed: number
     errors: string[]
     importRunId?: string | null
-    needsReviewCount?: number
-    unknownUniqueCount?: number
-    needsReview?: any
+    missingDataStats?: Record<string, number> // 欠損データ統計
+    criticalMissingDataStats?: Record<string, number> // 重要データ欠損統計
   } | null>(null)
   const [lastImportResults, setLastImportResults] = useState<Record<string, { success: number; failed: number; time: string; needsReviewCount?: number; unknownUniqueCount?: number; importRunId?: string | null }>>({}) // 各設定の最終取得結果
   const [lastImportNeedsReviewDetails, setLastImportNeedsReviewDetails] = useState<Record<string, any>>({})
   
+  // インポート結果履歴の型定義
+  type ImportResultHistoryEntry = {
+    id: string
+    timestamp: string
+    configId: string
+    configName: string
+    result: {
+      success: number
+      failed: number
+      errors: string[]
+      importRunId?: string | null
+      missingDataStats?: Record<string, number>
+      criticalMissingDataStats?: Record<string, number>
+    }
+  }
+  const [importResultHistory, setImportResultHistory] = useState<ImportResultHistoryEntry[]>([])
+  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState<number>(0) // 選択中の履歴インデックス
+  
   // ファイルアップロード用のstate
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [csvRows, setCsvRows] = useState<string[][]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [uploadMode, setUploadMode] = useState<'spreadsheet' | 'file'>('spreadsheet')
   
@@ -280,6 +337,8 @@ export default function SettingsContent() {
   const [editingConfigId, setEditingConfigId] = useState<string | null>(null)
   const [newConfigName, setNewConfigName] = useState('')
   const [newLeadSourcePrefix, setNewLeadSourcePrefix] = useState('')
+  const [updateMode, setUpdateMode] = useState<'incremental' | 'full'>('incremental')
+  const [incrementalLimit, setIncrementalLimit] = useState(100)
   
   // マッピング結果表示用のモーダル
   const [viewingMappingConfig, setViewingMappingConfig] = useState<SavedSpreadsheetConfig | null>(null)
@@ -323,6 +382,8 @@ export default function SettingsContent() {
   const [importedRecords, setImportedRecords] = useState<any[]>([])
   const [isLoadingRecords, setIsLoadingRecords] = useState(false)
   const [recordsFilter, setRecordsFilter] = useState<string>('all') // リードソースでフィルタ
+  const [showAllRecords, setShowAllRecords] = useState(false) // 全件表示フラグ
+  const [totalRecordsCount, setTotalRecordsCount] = useState<number | null>(null) // 総件数
 
   useEffect(() => {
     // データベースから設定を読み込む（フォールバック: localStorage）
@@ -420,6 +481,25 @@ export default function SettingsContent() {
     
     loadSettings()
     
+    // インポート結果履歴を読み込む
+    const loadImportResultHistory = () => {
+      try {
+        const savedHistory = localStorage.getItem('sfa-import-result-history')
+        if (savedHistory) {
+          const history = JSON.parse(savedHistory) as ImportResultHistoryEntry[]
+          if (history.length > 0) {
+            setImportResultHistory(history)
+            // 最新の結果を表示
+            setImportResult(history[0].result)
+            setSelectedHistoryIndex(0)
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load import result history:', e)
+      }
+    }
+    loadImportResultHistory()
+    
     // スプレッドシート設定を読み込む（現在編集中の設定）
     // 注意: 読み込み時は常に「未保存」「未取得」状態として扱う
     const savedSpreadsheet = localStorage.getItem('sfa-spreadsheet-config')
@@ -497,6 +577,8 @@ export default function SettingsContent() {
             lastImportedAt: row.last_imported_at,
             createdAt: row.created_at,
             lastSavedAt: row.updated_at,
+            updateMode: row.update_mode || 'incremental',
+            incrementalLimit: row.incremental_limit || 100,
           }))
           
           // DBとlocalStorageをマージ（DBを優先、localStorageにしかないものも保持）
@@ -1068,6 +1150,8 @@ export default function SettingsContent() {
           ...spreadsheetConfig,
           name: newConfigName,
           leadSourcePrefix: newLeadSourcePrefix,
+          updateMode: updateMode,
+          incrementalLimit: incrementalLimit,
           lastSavedAt: now,
         }
         
@@ -1099,6 +1183,8 @@ export default function SettingsContent() {
           id: `config-${Date.now()}`,
           name: newConfigName,
           leadSourcePrefix: newLeadSourcePrefix,
+          updateMode: updateMode,
+          incrementalLimit: incrementalLimit,
           createdAt: now,
           lastSavedAt: now,
         }
@@ -1132,6 +1218,8 @@ export default function SettingsContent() {
       // フォームをリセット
       setNewConfigName('')
       setNewLeadSourcePrefix('')
+      setUpdateMode('incremental')
+      setIncrementalLimit(100)
       setEditingConfigId(null)
       setSpreadsheetConfig(DEFAULT_SPREADSHEET_CONFIG)
       setIsConfigSaved(true)
@@ -1168,6 +1256,8 @@ export default function SettingsContent() {
     })
     setNewConfigName(config.name)
     setNewLeadSourcePrefix(config.leadSourcePrefix)
+    setUpdateMode(config.updateMode || 'incremental')
+    setIncrementalLimit(config.incrementalLimit || 100)
     setEditingConfigId(config.id)
     setActiveSection('spreadsheet')
     setSpreadsheetSubTab('settings')
@@ -1253,37 +1343,43 @@ export default function SettingsContent() {
   // CSVファイルをパース
   const parseCSVFile = (csvText: string): string[][] => {
     const rows: string[][] = []
-    const lines = csvText.split(/\r?\n/)
-    
-    for (const line of lines) {
-      if (line.trim() === '') continue
-      
-      const cells: string[] = []
-      let current = ''
-      let inQuotes = false
-      
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i]
-        
-        if (char === '"') {
-          if (inQuotes && line[i + 1] === '"') {
-            current += '"'
-            i++
-          } else {
-            inQuotes = !inQuotes
-          }
-        } else if (char === ',' && !inQuotes) {
-          cells.push(current.trim())
-          current = ''
+    let currentRow: string[] = []
+    let currentCell = ''
+    let inQuotes = false
+
+    for (let i = 0; i < csvText.length; i++) {
+      const char = csvText[i]
+      const nextChar = csvText[i + 1]
+
+      if (char === '"') {
+        if (inQuotes && nextChar === '"') {
+          currentCell += '"'
+          i++
         } else {
-          current += char
+          inQuotes = !inQuotes
         }
+      } else if (char === ',' && !inQuotes) {
+        currentRow.push(currentCell.trim())
+        currentCell = ''
+      } else if ((char === '\r' || char === '\n') && !inQuotes) {
+        if (char === '\r' && nextChar === '\n') {
+          i++
+        }
+        currentRow.push(currentCell.trim())
+        rows.push(currentRow)
+        currentRow = []
+        currentCell = ''
+      } else {
+        currentCell += char
       }
-      cells.push(current.trim())
-      rows.push(cells)
     }
-    
-    return rows
+
+    if (currentCell || currentRow.length > 0) {
+      currentRow.push(currentCell.trim())
+      rows.push(currentRow)
+    }
+
+    return rows.filter((row) => row.some((cell) => cell.trim() !== ''))
   }
 
   // ファイルを読み込んでヘッダーを取得
@@ -1305,43 +1401,14 @@ export default function SettingsContent() {
         return
       }
       
-      const headers = rows[0]
-      setSpreadsheetHeaders(headers)
-      
-      // サンプルデータ行を取得（2行目、存在する場合）
-      const sampleRow: string[] = rows.length > 1 ? rows[1] : []
-      
-      // 自動マッピング（ヘッダー名とサンプルデータから推定）
-      // 一意性確保: 既に使用されたフィールドは他の列に割り当てない
-      const usedFields = new Set<string>()
-      const autoMappings: ColumnMapping[] = headers.map((header: string, index: number) => {
-        const columnLetter = getColumnLetter(index) // A, B, ..., Z, AA, AB, ...
-        const sampleValue = sampleRow[index] || ''
-        
-        // マッピング推定ロジック
-        const matchedField = findBestMatch(header, sampleValue)
-        
-        // 一意性確保: 既に使用されているフィールドはスキップ
-        let targetField = ''
-        if (matchedField && !usedFields.has(matchedField.key)) {
-          targetField = matchedField.key
-          usedFields.add(matchedField.key)
-        }
-        
-        return {
-          spreadsheetColumn: columnLetter,
-          spreadsheetHeader: header,
-          sampleData: sampleValue, // サンプルデータを設定（存在しない場合は空文字）
-          targetField,
-        }
-      })
-      
+      setCsvRows(rows)
+      setSpreadsheetHeaders([])
       setSpreadsheetConfig(prev => ({
         ...prev,
-        columnMappings: autoMappings,
+        columnMappings: [],
       }))
-      // CSVアップロードは準備段階なので、未保存状態にしない
-      
+      setIsHeadersFetched(false)
+      setIsMappingConfirmed(false)
       setUploadMode('file')
       
     } catch (error) {
@@ -1349,6 +1416,221 @@ export default function SettingsContent() {
       alert('ファイルの読み込みに失敗しました')
     } finally {
       setIsUploading(false)
+    }
+  }
+
+  const runCsvMapping = () => {
+    if (csvRows.length === 0) {
+      alert('CSVファイルを先に選択してください')
+      return
+    }
+    const headerRowIndex = Math.max(0, (spreadsheetConfig.headerRow || 1) - 1)
+    if (headerRowIndex >= csvRows.length) {
+      alert(`指定されたヘッダー行（${spreadsheetConfig.headerRow || 1}行目）が存在しません`)
+      return
+    }
+    const headers = csvRows[headerRowIndex]
+    setSpreadsheetHeaders(headers)
+
+    const sampleRowIndex = headerRowIndex + 1
+    const sampleRow: string[] = csvRows.length > sampleRowIndex ? csvRows[sampleRowIndex] : []
+
+    const usedFields = new Set<string>()
+    const autoMappings: ColumnMapping[] = headers.map((header: string, index: number) => {
+      const columnLetter = getColumnLetter(index)
+      const sampleValue = sampleRow[index] || ''
+
+      const matchedField = findBestMatch(header, sampleValue)
+      let targetField = ''
+      if (matchedField && !usedFields.has(matchedField.key)) {
+        targetField = matchedField.key
+        usedFields.add(matchedField.key)
+      }
+
+      return {
+        spreadsheetColumn: columnLetter,
+        spreadsheetHeader: header,
+        sampleData: sampleValue,
+        targetField,
+      }
+    })
+
+    setSpreadsheetConfig(prev => ({
+      ...prev,
+      columnMappings: autoMappings,
+    }))
+  }
+
+  const getColumnIndexFromLetter = (column: string): number | null => {
+    if (!column) return null
+    let index = 0
+    for (let i = 0; i < column.length; i++) {
+      const code = column.charCodeAt(i)
+      if (code < 65 || code > 90) return null
+      index = index * 26 + (code - 64)
+    }
+    return index - 1
+  }
+
+  const buildCallCsvMappings = (): ColumnMapping[] => {
+    const headerRowIndex = Math.max(0, (spreadsheetConfig.headerRow || 1) - 1)
+    const headers = csvRows[headerRowIndex] || []
+    const sampleRowIndex = headerRowIndex + 1
+    const sampleRow: string[] = csvRows.length > sampleRowIndex ? csvRows[sampleRowIndex] : []
+
+    const mappings: Array<{ column: string; targetField: string }> = [
+      { column: 'B', targetField: 'leadId' },
+      { column: 'C', targetField: 'leadSource' },
+      { column: 'D', targetField: 'linkedDate' },
+      { column: 'E', targetField: 'industry' },
+      { column: 'F', targetField: 'companyName' },
+      { column: 'G', targetField: 'contactName' },
+      { column: 'H', targetField: 'contactNameKana' },
+      { column: 'I', targetField: 'phone' },
+      { column: 'J', targetField: 'email' },
+      { column: 'K', targetField: 'address' },
+      { column: 'L', targetField: 'openingDate' },
+      { column: 'M', targetField: 'contactPreferredDateTime' },
+      { column: 'N', targetField: 'allianceRemarks' },
+      { column: 'O', targetField: 'omcAdditionalInfo1' },
+      { column: 'P', targetField: 'omcSelfFunds' },
+      { column: 'Q', targetField: 'omcPropertyStatus' },
+      { column: 'R', targetField: 'amazonTaxAccountant' },
+      { column: 'S', targetField: 'meetsmoreLink' },
+      { column: 'T', targetField: 'meetsmoreEntityType' },
+      { column: 'U', targetField: 'makuakePjtPage' },
+      { column: 'V', targetField: 'makuakeExecutorPage' },
+      { column: 'W', targetField: 'staffIS' },
+      { column: 'X', targetField: 'statusIS' },
+      { column: 'Y', targetField: 'statusUpdateDate' },
+      { column: 'Z', targetField: 'cannotContactReason' },
+      { column: 'AA', targetField: 'recyclePriority' },
+      { column: 'AB', targetField: 'resultContactStatus' },
+      { column: 'AC', targetField: 'lastCalledDate' },
+      { column: 'AD', targetField: 'callCount' },
+      { column: 'AE', targetField: 'callDuration' },
+      { column: 'AF', targetField: 'conversationMemo' },
+      { column: 'AH', targetField: 'actionOutsideCall' },
+      { column: 'AI', targetField: 'nextActionDate' },
+      { column: 'AJ', targetField: 'nextActionContent' },
+      { column: 'AK', targetField: 'nextActionSupplement' },
+      { column: 'AL', targetField: 'nextActionCompleted' },
+      { column: 'AM', targetField: 'appointmentDate' },
+      { column: 'AN', targetField: 'dealSetupDate' },
+      { column: 'AO', targetField: 'dealTime' },
+      { column: 'AP', targetField: 'dealStaffFS' },
+      { column: 'AQ', targetField: 'dealResult' },
+      { column: 'AR', targetField: 'lostReasonFS' },
+    ]
+
+    return mappings.map(({ column, targetField }) => {
+      const idx = getColumnIndexFromLetter(column)
+      const header = idx !== null ? headers[idx] || '' : ''
+      const sampleValue = idx !== null ? sampleRow[idx] || '' : ''
+      return {
+        spreadsheetColumn: column,
+        spreadsheetHeader: header,
+        sampleData: sampleValue,
+        targetField,
+      }
+    })
+  }
+
+  const importCallCsvDirect = async () => {
+    if (csvRows.length === 0) {
+      alert('CSVファイルを先に選択してください')
+      return
+    }
+    if (!spreadsheetConfig.headerRow) {
+      alert('ヘッダー行を入力してください')
+      return
+    }
+
+    const headerRowIndex = Math.max(0, spreadsheetConfig.headerRow - 1)
+    if (headerRowIndex >= csvRows.length) {
+      alert(`指定されたヘッダー行（${spreadsheetConfig.headerRow}行目）が存在しません`)
+      return
+    }
+
+    const columnMappings = buildCallCsvMappings()
+    setIsImporting(true)
+    setImportingState({ configId: 'csv-direct', mode: 'full' })
+    setImportResult(null)
+
+    try {
+      const response = await fetch('/api/spreadsheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadMode: 'file',
+          csvRows,
+          columnMappings,
+          headerRow: spreadsheetConfig.headerRow || 1,
+          updateMode: 'full',
+          incrementalLimit,
+          allowedLeadSources: ['TEMPOS', 'OMC'],
+        }),
+      })
+
+      const result = await response.json()
+      if (!response.ok) {
+        const errorMessage = result?.error || 'データ取得に失敗しました'
+        throw new Error(errorMessage)
+      }
+
+      const importedCount = result.imported || 0
+      const newRecordsCount = result.newRecords || 0
+      const updatedRecordsCount = result.updatedRecords || 0
+      const failedCount = result.failed || 0
+      const importRunId = result.importRunId || null
+      const missingDataStats = result.missingDataStats || {}
+      const criticalMissingDataStats = result.criticalMissingDataStats || {}
+
+      const displayCount = importedCount
+      const newImportResult = {
+        success: displayCount,
+        failed: failedCount,
+        errors: result.errors || [],
+        importRunId,
+        missingDataStats,
+        criticalMissingDataStats,
+        newRecords: newRecordsCount,
+        updatedRecords: updatedRecordsCount,
+      }
+
+      setImportResult(newImportResult)
+      setSaveMessage(
+        `CSV取込: 成功${displayCount}件（新規${newRecordsCount}・更新${updatedRecordsCount}）, 失敗${failedCount}件`
+      )
+
+      const newHistoryEntry: ImportResultHistoryEntry = {
+        id: importRunId || `csv-import-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        configId: 'csv-direct',
+        configName: 'CSV架電取込',
+        result: newImportResult,
+      }
+      const existingHistory = JSON.parse(
+        localStorage.getItem('sfa-import-result-history') || '[]'
+      ) as ImportResultHistoryEntry[]
+      const updatedHistory = [newHistoryEntry, ...existingHistory].slice(0, 50)
+      localStorage.setItem('sfa-import-result-history', JSON.stringify(updatedHistory))
+      setImportResultHistory(updatedHistory)
+      setSelectedHistoryIndex(0)
+    } catch (error: any) {
+      const errorMessage = error?.message || 'データ取得に失敗しました'
+      setImportResult({
+        success: 0,
+        failed: 0,
+        errors: [errorMessage],
+        importRunId: null,
+        missingDataStats: {},
+        criticalMissingDataStats: {},
+      })
+      alert(`データ取得に失敗しました: ${errorMessage}`)
+    } finally {
+      setIsImporting(false)
+      setImportingState(null)
     }
   }
 
@@ -1376,7 +1658,7 @@ export default function SettingsContent() {
   }
   
   // データをインポート（手動実行用）
-  const importData = async (config?: SavedSpreadsheetConfig) => {
+  const importData = async (config?: SavedSpreadsheetConfig, overrideUpdateMode?: 'incremental' | 'full') => {
     const configToUse = config || (editingConfigId ? savedConfigs.find(c => c.id === editingConfigId) : null)
     
     if (!configToUse) {
@@ -1384,30 +1666,53 @@ export default function SettingsContent() {
       return
     }
     
-    if (!confirm(`${configToUse.name} からデータを取得しますか？\n既存のリードIDと重複するデータは更新されます。`)) {
+    // 更新モードを決定（オーバーライド指定があればそれを使用、なければ設定のupdateModeを使用）
+    const updateMode = overrideUpdateMode || configToUse.updateMode || 'incremental'
+    const modeLabel = updateMode === 'full' ? '全件' : '差分'
+    
+    if (!confirm(`${configToUse.name} から${modeLabel}データを取得しますか？\n既存のリードIDと重複するデータは更新され、電話番号重複は新規作成で重複フラグが付与されます。`)) {
       return
     }
     
     setIsImporting(true)
-    setImportingConfigId(configToUse.id) // 取得中のカードIDを設定
+    setImportingState({ configId: configToUse.id, mode: updateMode }) // 取得中の設定IDとモードを設定
     setImportResult(null)
     
     try {
-      console.log(`[importData] Starting import for ${configToUse.name}...`)
+      console.log(`[importData] Starting import for ${configToUse.name} (mode: ${updateMode})...`)
       
-      const response = await fetch('/api/spreadsheet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          spreadsheetId: configToUse.spreadsheetId,
-          sheetName: configToUse.sheetName || 'Sheet1',
-          sheetGid: configToUse.sheetGid,
-          headerRow: configToUse.headerRow || 1,
-          columnMappings: configToUse.columnMappings.filter(m => m.targetField),
-          leadSourcePrefix: configToUse.leadSourcePrefix,
-          spreadsheetConfigId: configToUse.id,
-        }),
-      })
+      // タイムアウト設定（6分 = 360秒）- API側のmaxDuration(300秒)より長く設定
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => {
+        controller.abort()
+      }, 360000) // 6分
+      
+      let response: Response
+      try {
+        response = await fetch('/api/spreadsheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            spreadsheetId: configToUse.spreadsheetId,
+            sheetName: configToUse.sheetName || 'Sheet1',
+            sheetGid: configToUse.sheetGid,
+            headerRow: configToUse.headerRow || 1,
+            columnMappings: configToUse.columnMappings.filter(m => m.targetField),
+            leadSourcePrefix: configToUse.leadSourcePrefix,
+            spreadsheetConfigId: configToUse.id,
+            updateMode: updateMode,
+            incrementalLimit: configToUse.incrementalLimit || 100,
+          }),
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId)
+        if (fetchError.name === 'AbortError') {
+          throw new Error('リクエストがタイムアウトしました。データ量が多い可能性があります。しばらく待ってから再度お試しください。')
+        }
+        throw fetchError
+      }
       
       console.log(`[importData] Response status: ${response.status}`)
       
@@ -1417,49 +1722,92 @@ export default function SettingsContent() {
         throw new Error(`HTTP ${response.status}: ${errorText}`)
       }
       
-      const result = await response.json()
-      console.log(`[importData] Result:`, result)
+      let result: any
+      try {
+        const resultText = await response.text()
+        if (!resultText) {
+          throw new Error('レスポンスが空です')
+        }
+        result = JSON.parse(resultText)
+        console.log(`[importData] Result:`, result)
+      } catch (parseError: any) {
+        console.error('[importData] JSON parse error:', parseError)
+        throw new Error(`レスポンスの解析に失敗しました: ${parseError.message}`)
+      }
       
       if (result.error) {
+        console.error('[importData] API returned error:', result.error)
+        setImportResult({
+          success: 0,
+          failed: 0,
+          errors: [result.error],
+          importRunId: null,
+          missingDataStats: {},
+          criticalMissingDataStats: {},
+        })
         alert(`エラー: ${result.error}`)
         return
       }
       
       const importedCount = result.imported || 0
+      const newRecordsCount = result.newRecords || 0 // 新規作成件数
+      const updatedRecordsCount = result.updatedRecords || 0 // 更新件数
       const failedCount = result.failed || 0
-      const needsReviewCount = result.needsReviewCount || 0
-      const unknownUniqueCount = result.unknownUniqueCount || 0
       const importRunId = result.importRunId || null
+      const missingDataStats = result.missingDataStats || {}
+      const criticalMissingDataStats = result.criticalMissingDataStats || {}
       
-      setImportResult({
-        success: importedCount,
+      // 全件取得時は合計表示、それ以外は新規作成件数を優先的に表示
+      const isFullMode = updateMode === 'full'
+      const displayCount = isFullMode
+        ? importedCount
+        : (newRecordsCount > 0 ? newRecordsCount : importedCount)
+      
+      const newImportResult = {
+        success: displayCount, // 新規作成件数を優先的に表示
         failed: failedCount,
         errors: result.errors || [],
-        needsReviewCount,
-        unknownUniqueCount,
         importRunId,
-        needsReview: result.needsReview || null,
-      })
+        missingDataStats,
+        criticalMissingDataStats,
+        newRecords: newRecordsCount,
+        updatedRecords: updatedRecordsCount,
+      }
+      
+      setImportResult(newImportResult)
+      
+      // インポート結果履歴に追加
+      const newHistoryEntry: ImportResultHistoryEntry = {
+        id: importRunId || `import-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        configId: configToUse.id,
+        configName: configToUse.name,
+        result: newImportResult,
+      }
+      
+      // 既存の履歴を読み込む
+      const existingHistory = JSON.parse(
+        localStorage.getItem('sfa-import-result-history') || '[]'
+      ) as ImportResultHistoryEntry[]
+      
+      // 最新の結果を先頭に追加（最大50件まで保持）
+      const updatedHistory = [newHistoryEntry, ...existingHistory].slice(0, 50)
+      localStorage.setItem('sfa-import-result-history', JSON.stringify(updatedHistory))
+      setImportResultHistory(updatedHistory)
+      setSelectedHistoryIndex(0) // 最新の結果を選択
       
       // 各設定の取得結果を保存
       setLastImportResults(prev => ({
         ...prev,
         [configToUse.id]: {
-          success: importedCount,
+          success: displayCount, // 新規作成件数を優先的に表示
           failed: failedCount,
           time: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-          needsReviewCount,
-          unknownUniqueCount,
+          needsReviewCount: 0,
+          unknownUniqueCount: 0,
           importRunId,
         }
       }))
-
-      if (result.needsReview) {
-        setLastImportNeedsReviewDetails(prev => ({
-          ...prev,
-          [configToUse.id]: result.needsReview,
-        }))
-      }
       
       // 最終インポート日時を更新（データベースにも保存）
       const lastImportedAt = new Date().toISOString()
@@ -1484,26 +1832,45 @@ export default function SettingsContent() {
       }
       
       // 完了メッセージ（alertではなくUI上に表示するため、ここでは表示しない）
-      console.log(`[importData] ${configToUse.name}: ${importedCount}件成功, ${failedCount}件失敗`)
+      console.log(`[importData] ${configToUse.name}: ${displayCount}件成功 (新規: ${newRecordsCount}件, 更新: ${updatedRecordsCount}件), ${failedCount}件失敗`)
       
-    } catch (error) {
-      console.error('Import failed:', error)
-      alert('データ取得に失敗しました')
+    } catch (error: any) {
+      console.error('[importData] Import failed:', error)
+      const errorMessage = error?.message || 'データ取得に失敗しました'
+      console.error('[importData] Error details:', {
+        name: error?.name,
+        message: errorMessage,
+        stack: error?.stack,
+      })
+      
+      // エラー時も結果を表示（失敗件数のみ）
+      setImportResult({
+        success: 0,
+        failed: 0,
+        errors: [errorMessage],
+        importRunId: null,
+        missingDataStats: {},
+        criticalMissingDataStats: {},
+      })
+      
+      alert(`データ取得に失敗しました: ${errorMessage}`)
     } finally {
+      console.log('[importData] Finally block: resetting import state')
       setIsImporting(false)
-      setImportingConfigId(null)
+      setImportingState(null)
     }
   }
 
   // 連携データを取得（APIルート経由）
-  const loadImportedRecords = async () => {
+  const loadImportedRecords = async (loadAll: boolean = false) => {
     setIsLoadingRecords(true)
     try {
       const params = new URLSearchParams()
       if (recordsFilter !== 'all') {
         params.set('lead_source', recordsFilter)
       }
-      params.set('limit', '100')
+      // 全件表示の場合はlimit=0（無制限）、それ以外は100件
+      params.set('limit', loadAll ? '0' : '100')
       
       const response = await fetch(`/api/call-records?${params.toString()}`)
       
@@ -1513,8 +1880,14 @@ export default function SettingsContent() {
         return
       }
       
-      const { records } = await response.json()
+      const { records, totalCount } = await response.json()
       setImportedRecords(records || [])
+      if (totalCount !== undefined) {
+        setTotalRecordsCount(totalCount)
+      }
+      if (loadAll) {
+        setShowAllRecords(true)
+      }
     } catch (error) {
       console.error('Failed to load records:', error)
     } finally {
@@ -2325,16 +2698,6 @@ export default function SettingsContent() {
                   連携リスト
                 </button>
                 <button
-                  onClick={() => setSpreadsheetSubTab('columns')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    spreadsheetSubTab === 'columns'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  連携カラム
-                </button>
-                <button
                   onClick={() => setSpreadsheetSubTab('data')}
                   className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                     spreadsheetSubTab === 'data'
@@ -2343,6 +2706,16 @@ export default function SettingsContent() {
                   }`}
                 >
                   連携データ
+                </button>
+                <button
+                  onClick={() => setSpreadsheetSubTab('columns')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    spreadsheetSubTab === 'columns'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  連携カラム
                 </button>
               </div>
 
@@ -2406,12 +2779,74 @@ export default function SettingsContent() {
                           aria-label="CSVファイルを選択"
                         />
                         <p className="mt-1 text-xs text-gray-500">
-                          1行目がヘッダー行として認識されます。Excelから「CSV UTF-8（コンマ区切り）」形式で保存してください。
+                          ヘッダー行は下の入力欄で指定できます。Excelから「CSV UTF-8（コンマ区切り）」形式で保存してください。
                         </p>
                         {uploadedFile && (
                           <p className="mt-2 text-sm text-green-600">
                             ✓ {uploadedFile.name} を読み込みました
                           </p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          ヘッダー行 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={spreadsheetConfig.headerRow === 0 ? '' : spreadsheetConfig.headerRow}
+                          onChange={(e) => {
+                            const val = e.target.value
+                            if (val === '' || /^\d+$/.test(val)) {
+                              const num = parseInt(val, 10)
+                              updateSpreadsheetConfig({ headerRow: isNaN(num) ? 0 : num })
+                            }
+                          }}
+                          className="w-full input text-sm"
+                          placeholder="例: 8"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          列名（ヘッダー）が記載されている行番号を指定してください
+                        </p>
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={runCsvMapping}
+                          disabled={csvRows.length === 0}
+                          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                            csvRows.length === 0
+                              ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                              : 'bg-primary-600 text-white hover:bg-primary-700'
+                          }`}
+                        >
+                          カラムマッピングを実行
+                        </button>
+                        <p className="mt-1 text-xs text-gray-500">
+                          ヘッダー行を入力後に実行してください
+                        </p>
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={importCallCsvDirect}
+                          disabled={csvRows.length === 0 || isImporting}
+                          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                            csvRows.length === 0 || isImporting
+                              ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                              : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                          }`}
+                        >
+                          架電CSVをDBに取り込む
+                        </button>
+                        <p className="mt-1 text-xs text-gray-500">
+                          TEMPOS/OMCのみ対象、固定マッピングで更新します
+                        </p>
+                        {saveMessage && (
+                          <div className="mt-2 p-3 rounded-lg bg-green-50 border border-green-200">
+                            <p className="text-sm text-green-700">{saveMessage}</p>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2726,6 +3161,48 @@ export default function SettingsContent() {
                             リードID生成時に使用（例: TP0001）
                           </p>
                         </div>
+                        
+                        {/* 更新モード選択 */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            デフォルト更新モード
+                          </label>
+                          <select
+                            value={updateMode}
+                            onChange={(e) => setUpdateMode(e.target.value as 'incremental' | 'full')}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="incremental">差分更新（最新N件）</option>
+                            <option value="full">全件更新</option>
+                          </select>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {updateMode === 'incremental' 
+                              ? 'デフォルトで最新のデータのみを処理します（推奨）。連携リストのボタンで上書き可能です。'
+                              : 'デフォルトでスプレッドシートの全データを処理します。連携リストのボタンで上書き可能です。'}
+                          </p>
+                        </div>
+                        
+                        {/* 差分更新件数（差分更新モード時のみ表示） */}
+                        {updateMode === 'incremental' && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              差分更新件数
+                            </label>
+                            <input
+                              type="number"
+                              value={incrementalLimit}
+                              onChange={(e) => setIncrementalLimit(Math.max(1, parseInt(e.target.value) || 100))}
+                              min={1}
+                              max={10000}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="100"
+                            />
+                            <p className="mt-1 text-xs text-gray-500">
+                              最新の何件を処理するか指定します（デフォルト: 100件）
+                            </p>
+                          </div>
+                        )}
+                        
                         <div className="flex gap-2">
                           {editingConfigId && (
                             <button
@@ -2733,6 +3210,8 @@ export default function SettingsContent() {
                                 setEditingConfigId(null)
                                 setNewConfigName('')
                                 setNewLeadSourcePrefix('')
+                                setUpdateMode('incremental')
+                                setIncrementalLimit(100)
                                 setSpreadsheetConfig(DEFAULT_SPREADSHEET_CONFIG)
                                 setIsHeadersFetched(false)
                                 setIsMappingConfirmed(false)
@@ -2798,59 +3277,114 @@ export default function SettingsContent() {
                 {importResult && (
                   <div className="border border-gray-200 rounded-lg p-4 bg-white">
                     <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-sm font-semibold text-gray-900">直近の取り込み結果</div>
-                        <div className="text-xs text-gray-500 mt-1">
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-sm font-semibold text-gray-900">直近の取り込み結果</div>
+                          <button
+                            onClick={() => {
+                              if (confirm('インポート履歴をすべて削除しますか？')) {
+                                localStorage.removeItem('sfa-import-result-history')
+                                setImportResultHistory([])
+                                setImportResult(null)
+                                setSelectedHistoryIndex(0)
+                              }
+                            }}
+                            className="px-3 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                            title="履歴をクリア"
+                          >
+                            履歴をクリア
+                          </button>
+                        </div>
+                        <div className="text-xs text-gray-500 mb-2">
                           importRunId: <span className="font-mono">{importResult.importRunId || '-'}</span>
                         </div>
+                        {/* 履歴一覧 */}
+                        {importResultHistory.length > 0 && (
+                          <div className="mb-3">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              履歴一覧
+                            </label>
+                            <select
+                              value={selectedHistoryIndex}
+                              onChange={(e) => {
+                                const index = parseInt(e.target.value)
+                                setSelectedHistoryIndex(index)
+                                setImportResult(importResultHistory[index].result)
+                              }}
+                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              {importResultHistory.map((entry, index) => (
+                                <option key={entry.id} value={index}>
+                                  {new Date(entry.timestamp).toLocaleString('ja-JP', { 
+                                    year: 'numeric',
+                                    month: '2-digit',
+                                    day: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })} - {entry.configName} ({entry.result.success}件成功, {entry.result.failed}件失敗)
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
-                      {(importResult.needsReviewCount || 0) > 0 && (
-                        <button
-                          onClick={() => setActiveSection('healthCheck')}
-                          className="px-3 py-2 text-sm font-medium text-amber-900 bg-amber-100 rounded-lg hover:bg-amber-200"
-                          title="ヘルスチェックへ移動"
-                        >
-                          設定のヘルスチェックへ移動
-                        </button>
-                      )}
                     </div>
 
-                    <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                       <div className="border border-gray-200 rounded p-3">
                         <div className="text-xs text-gray-500">成功</div>
                         <div className="text-lg font-bold text-green-700">{importResult.success}</div>
                       </div>
                       <div className="border border-gray-200 rounded p-3">
-                        <div className="text-xs text-gray-500">失敗/スキップ</div>
+                        <div className="text-xs text-gray-500">失敗（DB操作エラーのみ）</div>
                         <div className="text-lg font-bold text-gray-700">{importResult.failed}</div>
-                      </div>
-                      <div className="border border-amber-200 rounded p-3 bg-amber-50">
-                        <div className="text-xs text-amber-800">needs_review（要確認）</div>
-                        <div className="text-lg font-bold text-amber-900">{importResult.needsReviewCount || 0}</div>
-                        <div className="text-xs text-amber-800">未登録値（ユニーク）: {importResult.unknownUniqueCount || 0}</div>
                       </div>
                     </div>
 
-                    {importResult.needsReview?.unknowns?.length > 0 && (
+                    {/* 重要データ欠損統計（常に表示、0件でも表示） */}
+                    {importResult.criticalMissingDataStats && (
                       <div className="mt-4">
-                        <div className="text-sm font-semibold text-gray-900 mb-2">要確認一覧（未登録値）</div>
-                        <div className="text-xs text-gray-500 mb-2">
-                          {importResult.needsReview.settingKey
-                            ? `${importResult.needsReview.settingKey}（${importResult.needsReview.settingKeyLabelJa || ''}）`
-                            : ''}
-                        </div>
-                        <div className="space-y-2">
-                          {importResult.needsReview.unknowns.map((u: any, idx: number) => (
-                            <div key={idx} className="border border-amber-200 rounded bg-amber-50 p-3 text-sm">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="font-mono text-xs bg-white px-2 py-1 rounded border border-amber-200">{u.value}</div>
-                                <div className="text-amber-900 font-semibold">{u.count}件</div>
-                              </div>
-                              {Array.isArray(u.sampleRecordIds) && u.sampleRecordIds.length > 0 && (
-                                <div className="text-xs text-amber-800 mt-2">
-                                  例（lead_id）: {u.sampleRecordIds.slice(0, 5).join(', ')}{u.sampleRecordIds.length > 5 ? '…' : ''}
+                        <div className="text-sm font-semibold text-red-900 mb-2">⚠️ 重要データ欠損統計</div>
+                        <div className="border border-red-200 rounded-lg p-3 bg-red-50">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-10 gap-2">
+                            {(['linkedDate', 'contactName', 'phone'] as const).map((fieldKey) => {
+                              const count = importResult.criticalMissingDataStats?.[fieldKey] || 0
+                              return (
+                                <div key={fieldKey} className={`border rounded-lg p-2 shadow-sm ${
+                                  count > 0 
+                                    ? 'border-red-300 bg-white' 
+                                    : 'border-gray-200 bg-gray-50'
+                                }`}>
+                                  <div className={`text-xs mb-1 ${
+                                    count > 0 ? 'text-red-700' : 'text-gray-500'
+                                  }`}>
+                                    {FIELD_LABELS[fieldKey] || fieldKey}
+                                  </div>
+                                  <div className={`text-sm font-bold ${
+                                    count > 0 ? 'text-red-900' : 'text-gray-400'
+                                  }`}>
+                                    {count}件
+                                  </div>
                                 </div>
-                              )}
+                              )
+                            })}
+                          </div>
+                          <p className="text-xs text-red-600 mt-2">
+                            連携日付、氏名、電話番号のいずれかが欠けているデータの件数です。リード連携元への通知が必要な場合があります。
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* データ欠損統計 */}
+                    {importResult.missingDataStats && Object.keys(importResult.missingDataStats).length > 0 && (
+                      <div className="mt-4">
+                        <div className="text-sm font-semibold text-gray-900 mb-2">データ欠損統計</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-10 gap-2">
+                          {Object.entries(importResult.missingDataStats).map(([fieldKey, count]) => (
+                            <div key={fieldKey} className="border border-gray-200 rounded-lg p-2 bg-white shadow-sm">
+                              <div className="text-xs text-gray-500 mb-1">{FIELD_LABELS[fieldKey] || fieldKey}</div>
+                              <div className="text-sm font-bold text-gray-900">{count}件</div>
                             </div>
                           ))}
                         </div>
@@ -2903,113 +3437,239 @@ export default function SettingsContent() {
                       </p>
                     </div>
                     {savedConfigs.length > 0 && (
-                      <button
-                        onClick={async () => {
-                          if (!confirm('すべての連携済みスプレッドシートからデータを一括取得しますか？')) {
-                            return
-                          }
-                          
-                          setIsImporting(true)
-                          setImportingConfigId('all') // 一括取得中
-                          setImportResult(null)
-                          
-                          try {
-                            console.log(`[sync-all] Starting sync for ${savedConfigs.length} configs...`)
-                            
-                            // タイムアウト設定（120秒）
-                            const controller = new AbortController()
-                            const timeoutId = setTimeout(() => controller.abort(), 120000)
-                            
-                            const response = await fetch('/api/spreadsheet/sync-all', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ configs: savedConfigs }),
-                              signal: controller.signal,
-                            })
-                            
-                            clearTimeout(timeoutId)
-                            console.log(`[sync-all] Response status: ${response.status}`)
-                            
-                            if (!response.ok) {
-                              const errorText = await response.text()
-                              console.error(`[sync-all] HTTP error: ${response.status}`, errorText)
-                              throw new Error(`HTTP ${response.status}: ${errorText}`)
-                            }
-                            
-                            const result = await response.json()
-                            console.log(`[sync-all] Result:`, result)
-                            
-                            if (result.error) {
-                              alert(`エラー: ${result.error}`)
+                      <div className="flex gap-2">
+                        {/* 全件一括取得ボタン */}
+                        <button
+                          onClick={async () => {
+                            if (!confirm('すべての連携済みスプレッドシートから全件データを一括取得しますか？')) {
                               return
                             }
                             
-                            const totalImported = result.totalImported || 0
-                            const totalFailed = result.totalFailed || 0
+                            setIsImporting(true)
+                            setImportingState({ configId: 'all', mode: 'full' })
+                            setImportResult(null)
                             
-                            setImportResult({
-                              success: totalImported,
-                              failed: totalFailed,
-                              errors: result.results?.flatMap((r: any) => r.errors || []) || [],
-                            })
-                            
-                            // 各設定の取得結果を個別に保存
-                            const now = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
-                            const newResults: Record<string, { success: number; failed: number; time: string }> = {}
-                            if (result.results && Array.isArray(result.results)) {
-                              for (const r of result.results) {
-                                if (r.configId && typeof r.imported === 'number') {
-                                  newResults[r.configId] = { 
-                                    success: r.imported || 0, 
-                                    failed: r.failed || 0,
-                                    time: now 
+                            try {
+                              console.log(`[sync-all-full] Starting full sync for ${savedConfigs.length} configs...`)
+                              
+                              // タイムアウト設定（10分 = 600秒）- 全件取得は時間がかかるため
+                              const controller = new AbortController()
+                              const timeoutId = setTimeout(() => controller.abort(), 600000)
+                              
+                              const response = await fetch('/api/spreadsheet/sync-all', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ configs: savedConfigs.map(c => ({ ...c, updateMode: 'full' })) }),
+                                signal: controller.signal,
+                              })
+                              
+                              clearTimeout(timeoutId)
+                              console.log(`[sync-all-full] Response status: ${response.status}`)
+                              
+                              if (!response.ok) {
+                                const errorText = await response.text()
+                                console.error(`[sync-all-full] HTTP error: ${response.status}`, errorText)
+                                throw new Error(`HTTP ${response.status}: ${errorText}`)
+                              }
+                              
+                              const result = await response.json()
+                              console.log(`[sync-all-full] Result:`, result)
+                              
+                              if (result.error) {
+                                alert(`エラー: ${result.error}`)
+                                return
+                              }
+                              
+                              const totalImported = result.totalImported || 0
+                              const totalFailed = result.totalFailed || 0
+                              
+                              setImportResult({
+                                success: totalImported,
+                                failed: totalFailed,
+                                errors: result.results?.flatMap((r: any) => r.errors || []) || [],
+                              })
+                              
+                              // 各設定の取得結果を個別に保存
+                              const now = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+                              const newResults: Record<string, { success: number; failed: number; time: string }> = {}
+                              if (result.results && Array.isArray(result.results)) {
+                                for (const r of result.results) {
+                                  if (r.configId && typeof r.imported === 'number') {
+                                    newResults[r.configId] = { 
+                                      success: r.imported || 0, 
+                                      failed: r.failed || 0,
+                                      time: now 
+                                    }
                                   }
                                 }
                               }
+                              setLastImportResults(prev => ({ ...prev, ...newResults }))
+                              
+                              // 最終インポート日時を更新（データベースにも保存）
+                              const lastImportedAt = new Date().toISOString()
+                              const updatedConfigs = savedConfigs.map(c => ({
+                                ...c,
+                                lastImportedAt,
+                              }))
+                              setSavedConfigs(updatedConfigs)
+                              localStorage.setItem('sfa-saved-spreadsheet-configs', JSON.stringify(updatedConfigs))
+                              
+                              // APIルート経由でデータベースにも保存
+                              try {
+                                const configsToUpdate = savedConfigs.map(c => ({ ...c, lastImportedAt }))
+                                await fetch('/api/spreadsheet/configs', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ configs: configsToUpdate }),
+                                })
+                              } catch (dbError) {
+                                console.error('Failed to update last_imported_at in DB:', dbError)
+                              }
+                              
+                              console.log(`[sync-all-full] 全件一括取得完了: ${totalImported}件成功, ${totalFailed}件失敗`)
+                            } catch (error: any) {
+                              console.error('Sync all full failed:', error)
+                              const errorMessage = error?.message || '不明なエラー'
+                              alert(`全件一括取得に失敗しました: ${errorMessage}`)
+                            } finally {
+                              setIsImporting(false)
+                              setImportingState(null)
                             }
-                            setLastImportResults(prev => ({ ...prev, ...newResults }))
+                          }}
+                          disabled={importingState?.configId === 'all'}
+                          className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                            importingState?.configId === 'all' && importingState?.mode === 'full'
+                              ? 'text-orange-700 bg-orange-100 cursor-wait'
+                              : 'text-white bg-red-600 hover:bg-red-700'
+                          } disabled:opacity-70`}
+                          title="全リードソースから全件データを一括取得"
+                        >
+                          {importingState?.configId === 'all' && importingState?.mode === 'full' ? (
+                            <span className="flex items-center gap-1">
+                              <span className="animate-spin">⏳</span>
+                              <span>全件取得中...</span>
+                            </span>
+                          ) : (
+                            '🔄 全件一括取得'
+                          )}
+                        </button>
+                        
+                        {/* 全件一括差分取得ボタン */}
+                        <button
+                          onClick={async () => {
+                            if (!confirm('すべての連携済みスプレッドシートから差分データを一括取得しますか？')) {
+                              return
+                            }
                             
-                            // 最終インポート日時を更新（データベースにも保存）
-                            const lastImportedAt = new Date().toISOString()
-                            const updatedConfigs = savedConfigs.map(c => ({
-                              ...c,
-                              lastImportedAt,
-                            }))
-                            setSavedConfigs(updatedConfigs)
-                            localStorage.setItem('sfa-saved-spreadsheet-configs', JSON.stringify(updatedConfigs))
+                            setIsImporting(true)
+                            setImportingState({ configId: 'all', mode: 'incremental' })
+                            setImportResult(null)
                             
-                            // APIルート経由でデータベースにも保存
                             try {
-                              const configsToUpdate = savedConfigs.map(c => ({ ...c, lastImportedAt }))
-                              await fetch('/api/spreadsheet/configs', {
+                              console.log(`[sync-all-incremental] Starting incremental sync for ${savedConfigs.length} configs...`)
+                              
+                              // タイムアウト設定（120秒）
+                              const controller = new AbortController()
+                              const timeoutId = setTimeout(() => controller.abort(), 120000)
+                              
+                              const response = await fetch('/api/spreadsheet/sync-all', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ configs: configsToUpdate }),
+                                body: JSON.stringify({ configs: savedConfigs.map(c => ({ ...c, updateMode: 'incremental' })) }),
+                                signal: controller.signal,
                               })
-                            } catch (dbError) {
-                              console.error('Failed to update last_imported_at in DB:', dbError)
+                              
+                              clearTimeout(timeoutId)
+                              console.log(`[sync-all-incremental] Response status: ${response.status}`)
+                              
+                              if (!response.ok) {
+                                const errorText = await response.text()
+                                console.error(`[sync-all-incremental] HTTP error: ${response.status}`, errorText)
+                                throw new Error(`HTTP ${response.status}: ${errorText}`)
+                              }
+                              
+                              const result = await response.json()
+                              console.log(`[sync-all-incremental] Result:`, result)
+                              
+                              if (result.error) {
+                                alert(`エラー: ${result.error}`)
+                                return
+                              }
+                              
+                              const totalImported = result.totalImported || 0
+                              const totalFailed = result.totalFailed || 0
+                              
+                              setImportResult({
+                                success: totalImported,
+                                failed: totalFailed,
+                                errors: result.results?.flatMap((r: any) => r.errors || []) || [],
+                              })
+                              
+                              // 各設定の取得結果を個別に保存
+                              const now = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+                              const newResults: Record<string, { success: number; failed: number; time: string }> = {}
+                              if (result.results && Array.isArray(result.results)) {
+                                for (const r of result.results) {
+                                  if (r.configId && typeof r.imported === 'number') {
+                                    newResults[r.configId] = { 
+                                      success: r.imported || 0, 
+                                      failed: r.failed || 0,
+                                      time: now 
+                                    }
+                                  }
+                                }
+                              }
+                              setLastImportResults(prev => ({ ...prev, ...newResults }))
+                              
+                              // 最終インポート日時を更新（データベースにも保存）
+                              const lastImportedAt = new Date().toISOString()
+                              const updatedConfigs = savedConfigs.map(c => ({
+                                ...c,
+                                lastImportedAt,
+                              }))
+                              setSavedConfigs(updatedConfigs)
+                              localStorage.setItem('sfa-saved-spreadsheet-configs', JSON.stringify(updatedConfigs))
+                              
+                              // APIルート経由でデータベースにも保存
+                              try {
+                                const configsToUpdate = savedConfigs.map(c => ({ ...c, lastImportedAt }))
+                                await fetch('/api/spreadsheet/configs', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ configs: configsToUpdate }),
+                                })
+                              } catch (dbError) {
+                                console.error('Failed to update last_imported_at in DB:', dbError)
+                              }
+                              
+                              console.log(`[sync-all-incremental] 全件一括差分取得完了: ${totalImported}件成功, ${totalFailed}件失敗`)
+                            } catch (error: any) {
+                              console.error('Sync all incremental failed:', error)
+                              const errorMessage = error?.message || '不明なエラー'
+                              alert(`全件一括差分取得に失敗しました: ${errorMessage}`)
+                            } finally {
+                              setIsImporting(false)
+                              setImportingState(null)
                             }
-                            
-                            // 完了通知（alertを削除してUI上に表示のみ）
-                            console.log(`[sync-all] 一括取得完了: ${totalImported}件成功, ${totalFailed}件失敗`)
-                          } catch (error: any) {
-                            console.error('Sync all failed:', error)
-                            const errorMessage = error?.message || '不明なエラー'
-                            alert(`一括取得に失敗しました: ${errorMessage}`)
-                          } finally {
-                            setIsImporting(false)
-                            setImportingConfigId(null)
-                          }
-                        }}
-                        disabled={importingConfigId === 'all'}
-                        className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                          importingConfigId === 'all'
-                            ? 'text-orange-700 bg-orange-100 cursor-wait'
-                            : 'text-white bg-green-600 hover:bg-green-700'
-                        } disabled:opacity-70`}
-                      >
-                        {importingConfigId === 'all' ? '⏳ 取得中...' : '🔄 すべて取得'}
-                      </button>
+                          }}
+                          disabled={importingState?.configId === 'all'}
+                          className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                            importingState?.configId === 'all' && importingState?.mode === 'incremental'
+                              ? 'text-orange-700 bg-orange-100 cursor-wait'
+                              : 'text-white bg-blue-600 hover:bg-blue-700'
+                          } disabled:opacity-70`}
+                          title="全リードソースから差分データのみを一括取得"
+                        >
+                          {importingState?.configId === 'all' && importingState?.mode === 'incremental' ? (
+                            <span className="flex items-center gap-1">
+                              <span className="animate-spin">⏳</span>
+                              <span>差分取得中...</span>
+                            </span>
+                          ) : (
+                            '🔄 全件一括差分取得'
+                          )}
+                        </button>
+                      </div>
                     )}
                   </div>
                   
@@ -3034,7 +3694,7 @@ export default function SettingsContent() {
                             setViewingMappingConfig(config)
                           }}
                         >
-                          <div className="flex items-start justify-between">
+                          <div className="flex items-end justify-between">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-2">
                                 <span className="text-lg font-semibold text-gray-900">
@@ -3082,63 +3742,98 @@ export default function SettingsContent() {
                                 )}
                               </div>
                             </div>
-                            <div className="flex flex-col gap-2 ml-4 min-w-[120px]">
-                              {/* 取得ボタンと結果表示 */}
-                              <div className="flex flex-col items-end gap-1">
+                            <div className="flex items-end justify-end gap-3 ml-4">
+                              {/* 取得結果表示（左側） */}
+                              {lastImportResults[config.id] && importingState?.configId !== config.id && (
+                                <div className="flex flex-col text-xs min-w-[120px]">
+                                  <span className="text-green-600 font-medium">
+                                    ✓ {lastImportResults[config.id].success}件成功
+                                  </span>
+                                  {lastImportResults[config.id].failed > 0 && (
+                                    <span className="text-gray-500">
+                                      ({lastImportResults[config.id].failed}件スキップ)
+                                    </span>
+                                  )}
+                                  {(lastImportResults[config.id].needsReviewCount || 0) > 0 && (
+                                    <span className="text-amber-700 font-medium">
+                                      要確認 {lastImportResults[config.id].needsReviewCount}件
+                                    </span>
+                                  )}
+                                  <span className="text-gray-400">
+                                    {lastImportResults[config.id].time}
+                                  </span>
+                                </div>
+                              )}
+                              {/* ボタン群（横一列・右寄せ・下寄せ） */}
+                              <div className="flex items-end gap-1.5">
+                                {/* 全件データ取得ボタン */}
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    importData(config)
+                                    importData(config, 'full')
                                   }}
-                                  disabled={importingConfigId === config.id}
+                                  disabled={importingState?.configId === config.id}
                                   className={`px-3 py-1.5 text-xs font-medium rounded transition-colors whitespace-nowrap ${
-                                    importingConfigId === config.id
+                                    importingState?.configId === config.id && importingState?.mode === 'full'
                                       ? 'text-orange-700 bg-orange-100 cursor-wait'
-                                      : 'text-green-700 bg-green-50 hover:bg-green-100'
+                                      : 'text-white bg-red-400 hover:bg-red-500'
                                   } disabled:opacity-70`}
+                                  title="全件データ取得"
                                 >
-                                  {importingConfigId === config.id ? '⏳ 取得中...' : '📥 データ取得'}
+                                  {importingState?.configId === config.id && importingState?.mode === 'full' ? (
+                                    <span className="flex items-center gap-1">
+                                      <span className="animate-spin">⏳</span>
+                                      <span>全件取得中</span>
+                                    </span>
+                                  ) : (
+                                    '全件'
+                                  )}
                                 </button>
-                                {/* 取得結果表示 */}
-                                {lastImportResults[config.id] && importingConfigId !== config.id && (
-                                  <div className="flex flex-col items-end text-xs">
-                                    <span className="text-green-600 font-medium">
-                                      ✓ {lastImportResults[config.id].success}件成功
+                                {/* 差分データ取得ボタン */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    importData(config, 'incremental')
+                                  }}
+                                  disabled={importingState?.configId === config.id}
+                                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors whitespace-nowrap ${
+                                    importingState?.configId === config.id && importingState?.mode === 'incremental'
+                                      ? 'text-orange-700 bg-orange-100 cursor-wait'
+                                      : 'text-white bg-blue-400 hover:bg-blue-500'
+                                  } disabled:opacity-70`}
+                                  title="差分データ取得"
+                                >
+                                  {importingState?.configId === config.id && importingState?.mode === 'incremental' ? (
+                                    <span className="flex items-center gap-1">
+                                      <span className="animate-spin">⏳</span>
+                                      <span>差分取得中</span>
                                     </span>
-                                    {lastImportResults[config.id].failed > 0 && (
-                                      <span className="text-gray-500">
-                                        ({lastImportResults[config.id].failed}件スキップ)
-                                      </span>
-                                    )}
-                                    {(lastImportResults[config.id].needsReviewCount || 0) > 0 && (
-                                      <span className="text-amber-700 font-medium">
-                                        要確認 {lastImportResults[config.id].needsReviewCount}件
-                                      </span>
-                                    )}
-                                    <span className="text-gray-400">
-                                      {lastImportResults[config.id].time}
-                                    </span>
-                                  </div>
-                                )}
+                                  ) : (
+                                    '差分'
+                                  )}
+                                </button>
+                                {/* 編集ボタン */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    loadConfigForEdit(config)
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 transition-colors whitespace-nowrap"
+                                >
+                                  編集
+                                </button>
+                                {/* 削除ボタン（ゴミ箱マーク） */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    deleteConfig(config.id)
+                                  }}
+                                  className="px-2 py-1.5 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors whitespace-nowrap"
+                                  title="削除"
+                                >
+                                  🗑️
+                                </button>
                               </div>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  loadConfigForEdit(config)
-                                }}
-                                className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 transition-colors whitespace-nowrap"
-                              >
-                                編集
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  deleteConfig(config.id)
-                                }}
-                                className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded hover:bg-red-100 transition-colors whitespace-nowrap"
-                              >
-                                削除
-                              </button>
                             </div>
                           </div>
                         </div>
@@ -3440,14 +4135,19 @@ export default function SettingsContent() {
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">連携データ一覧</h2>
                   <p className="text-xs text-gray-500 mt-1">
-                    スプレッドシートから取得したリードデータ（最新100件）
+                    スプレッドシートから取得したリードデータ
+                    {showAllRecords ? '（全件表示中）' : '（最新100件）'}
+                    {totalRecordsCount !== null && !showAllRecords && ` - 総件数: ${totalRecordsCount}件`}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
                   {/* リードソースフィルタ */}
                   <select
                     value={recordsFilter}
-                    onChange={(e) => setRecordsFilter(e.target.value)}
+                    onChange={(e) => {
+                      setRecordsFilter(e.target.value)
+                      setShowAllRecords(false)
+                    }}
                     title="リードソースでフィルタ"
                     className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
@@ -3458,8 +4158,23 @@ export default function SettingsContent() {
                       </option>
                     ))}
                   </select>
+                  {/* 全件表示ボタン */}
                   <button
-                    onClick={loadImportedRecords}
+                    onClick={() => loadImportedRecords(true)}
+                    disabled={isLoadingRecords || showAllRecords}
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                      showAllRecords
+                        ? 'text-gray-500 bg-gray-100 cursor-default'
+                        : 'text-white bg-green-600 hover:bg-green-700'
+                    } disabled:opacity-50`}
+                  >
+                    {isLoadingRecords ? '読み込み中...' : showAllRecords ? '✓ 全件表示中' : '📋 全件表示'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowAllRecords(false)
+                      loadImportedRecords(false)
+                    }}
                     disabled={isLoadingRecords}
                     className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
                   >
@@ -3473,7 +4188,15 @@ export default function SettingsContent() {
                 {isLoadingRecords ? (
                   '読み込み中...'
                 ) : (
-                  `${importedRecords.length}件のデータ${recordsFilter !== 'all' ? `（${recordsFilter}）` : ''}`
+                  <>
+                    {importedRecords.length}件のデータ
+                    {recordsFilter !== 'all' && `（${recordsFilter}）`}
+                    {totalRecordsCount !== null && !showAllRecords && importedRecords.length < totalRecordsCount && (
+                      <span className="text-gray-400 ml-2">
+                        （全{totalRecordsCount}件中）
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -3495,22 +4218,19 @@ export default function SettingsContent() {
                     <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                          連携日
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           リードID
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           ソース
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                          会社名/店舗名
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           氏名
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           電話番号
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                          連携日
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                           ステータス
@@ -3520,7 +4240,10 @@ export default function SettingsContent() {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {importedRecords.map((record) => (
                         <tr key={record.lead_id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-mono text-blue-600">
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {record.linked_date || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-mono text-blue-600 max-w-[120px] truncate" title={record.lead_id}>
                             {record.lead_id}
                           </td>
                           <td className="px-4 py-3 text-sm">
@@ -3528,17 +4251,11 @@ export default function SettingsContent() {
                               {record.lead_source || '-'}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 max-w-[200px] truncate" title={record.company_name}>
-                            {record.company_name || '-'}
-                          </td>
                           <td className="px-4 py-3 text-sm text-gray-900">
                             {record.contact_name || '-'}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-600 font-mono">
                             {record.phone || '-'}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-500">
-                            {record.linked_date || '-'}
                           </td>
                           <td className="px-4 py-3 text-sm">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
@@ -4088,6 +4805,178 @@ export default function SettingsContent() {
           </div>
         </>
       )}
+
+      {/* 架電関連DBフィールド整理表 */}
+      <div className="mt-8 card">
+        <div className="p-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">架電関連DBフィールド整理表</h2>
+          <p className="text-sm text-gray-600 mb-6">
+            架電管理で使用する主要なDBフィールドの役割と使い方を整理した表です。混乱を避けるため、各フィールドの意味と使い分けを確認してください。
+          </p>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse border border-gray-300">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">フィールド名（DB）</th>
+                  <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">日本語表記</th>
+                  <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">なぜあるのか</th>
+                  <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">現状の選択肢</th>
+                  <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">過去データの状況</th>
+                  <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">今後どう使うか</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="border border-gray-300 px-4 py-3 font-medium text-gray-900">status</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">架電進捗状態</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">当日の架電作業の進捗状態を表す</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未架電'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'架電中'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'03.アポイント獲得済'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'09.アポ獲得'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'04.アポなし'</code>
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未架電'</code>: 1124件<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'03.アポイント獲得済'</code>: 418件<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'09.アポ獲得'</code>: 209件
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <strong>推奨:</strong> <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未架電'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'架電中'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'商談獲得'</code>に統一<br/>
+                    <strong>過去データ:</strong> <code className="text-xs bg-gray-100 px-2 py-1 rounded">'03.アポイント獲得済'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'09.アポ獲得'</code> → 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'商談獲得'</code>に読み替え
+                  </td>
+                </tr>
+                <tr className="bg-gray-50">
+                  <td className="border border-gray-300 px-4 py-3 font-medium text-gray-900">status_is</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">リードステータス（IS）</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">リード全体のISステータスを表す（当日に限らない）</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    設定メニューより:<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'新規リード'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'コンタクト試行中（折り返し含む）'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'商談獲得'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'失注（リサイクル対象外）'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'失注（リサイクル対象 A-E付与）'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'対象外（Disqualified）'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'連絡不能（Unreachable）'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'既存顧客（属性へ移行予定）'</code>
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未架電'</code>: 1123件<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'商談獲得'</code>: 628件
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    設定メニューの値を使用<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">status = '商談獲得'</code>のレコードは
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">statusIS = '商談獲得'</code>も設定
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-gray-300 px-4 py-3 font-medium text-gray-900">today_call_status</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">その日の架電完了状態</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">その日の架電作業が完了したかどうかを表す</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'済'</code>（完了）, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未了'</code>（未完了）, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">null</code>
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">null</code>: 1750件<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'済'</code>: 1件
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <strong>推奨:</strong> <code className="text-xs bg-gray-100 px-2 py-1 rounded">'済'</code>（完了）または
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">null</code>（未完了）<br/>
+                    「終了」ボタンを押したときは<code className="text-xs bg-gray-100 px-2 py-1 rounded">'済'</code>に設定
+                  </td>
+                </tr>
+                <tr className="bg-gray-50">
+                  <td className="border border-gray-300 px-4 py-3 font-medium text-gray-900">call_status_today</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">その日の架電結果</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">その日の具体的な架電結果を表す（複数回架電に対応）</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'通電'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通1'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通2'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通3'</code>, ... 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未架電'</code>
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'通電'</code>: 1件<br/>
+                    その他は<code className="text-xs bg-gray-100 px-2 py-1 rounded">null</code>が多い
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <strong>推奨:</strong> その日の結果を保存<br/>
+                    「不通」ボタン: <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通1'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通2'</code>...<br/>
+                    「通電」ボタン: <code className="text-xs bg-gray-100 px-2 py-1 rounded">'通電'</code><br/>
+                    「終了」ボタン: 結果を保持
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-gray-300 px-4 py-3 font-medium text-gray-900">result_contact_status</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">直近架電結果</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">直近の架電結果を表す（設定メニューで管理）</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    設定メニューより:<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未架電'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'通電'</code>
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'通電'</code>: 414件<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通'</code>: 135件<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未通'</code>: 21件<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未架電'</code>: 6件<br/>
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未通電'</code>: 3件
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <strong>推奨:</strong> <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未架電'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'通電'</code>に統一<br/>
+                    <strong>過去データ:</strong> <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未通'</code>, 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'未通電'</code> → 
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">'不通'</code>に読み替え<br/>
+                    商談獲得したものは<code className="text-xs bg-gray-100 px-2 py-1 rounded">'通電'</code>に設定
+                  </td>
+                </tr>
+                <tr className="bg-gray-50">
+                  <td className="border border-gray-300 px-4 py-3 font-medium text-gray-900">ended_at</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">架電終了時刻</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">架電を終了した時刻を記録（KPI計算などに使用）</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    ISO8601形式のタイムスタンプ
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    ほとんどが<code className="text-xs bg-gray-100 px-2 py-1 rounded">null</code>
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    <strong>推奨:</strong> 「終了」ボタンを押したときに設定<br/>
+                    商談獲得したものは設定済みにする
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <h3 className="text-sm font-semibold text-yellow-900 mb-2">重要な違い</h3>
+            <ul className="text-sm text-yellow-800 space-y-1 list-disc list-inside">
+              <li><strong>call_status_today（その日の架電結果）:</strong> その日の詳細な結果（複数回架電に対応、不通1、不通2など）</li>
+              <li><strong>result_contact_status（直近架電結果）:</strong> 設定メニューで管理される「直近の架電結果」（シンプルな値）</li>
+              <li><strong>status（架電進捗状態）:</strong> 当日の作業状態（未架電、架電中、商談獲得など）</li>
+              <li><strong>statusIS（リードステータス）:</strong> リード全体のISステータス（当日に限らない）</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

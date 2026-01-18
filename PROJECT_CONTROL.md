@@ -412,6 +412,15 @@ REDISH_SFA/
 
 ---
 
+## エラーログ一覧
+
+| 日時 | エラー種別 | エラーメッセージ | 関連ファイル | 原因 | 対応 | パターンID |
+|------|-----------|------------------|-------------|------|------|-----------|
+| 2026-01-17 14:35 | 通信/ネットワーク | fetch failed (UND_ERR_SOCKET: other side closed) | `frontend/scripts/sync-contact-status.mjs` | Supabase接続のソケット切断 | 再実行で成功 | - |
+| 2026-01-17 15:12 | 実行時エラー | ReferenceError: Cannot access 'normalizedStatusIs' before initialization | `frontend/src/app/(auth)/calls/page.tsx` | 変数定義順 | 定義位置を修正 | - |
+
+---
+
 ## ⚠️ インシデント準拠記録
 
 ### INCIDENT-001: 設定変更が反映されない問題（2026-01-11）
